@@ -85,9 +85,9 @@ def parse_multipart(body: bytes, content_type: str) -> tuple[dict[str, str], lis
 def validate_analysis_files(files: list[tuple[str, bytes]]) -> None:
     names = [name.lower() for name, _ in files]
     archives = [name for name in names if name.endswith(".zip")]
-    sample_sheets = [name for name in names if name == "samples.csv"]
+    sample_sheets = [name for name in names if name.endswith(".csv")]
     if len(archives) != 1 or len(sample_sheets) != 1 or len(files) != 2:
-        raise ValueError("Upload exactly one ZIP data package and one samples.csv")
+        raise ValueError("Upload exactly one ZIP data package and one CSV sample table")
 
 
 class ASTKHandler(SimpleHTTPRequestHandler):

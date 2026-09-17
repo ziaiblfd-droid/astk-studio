@@ -76,17 +76,22 @@ def prepare_input_tree(job_dir: Path) -> None:
         safe_extract_zip(archive, data_dir)
 
 
-def find_samples_csv(job_dir: Path) -> Path:
-    candidates = sorted((job_dir / "input").rglob("samples.csv"))
+def find_sample_sheet(job_dir: Path) -> Path:
+    input_dir = job_dir / "input"
+    candidates = sorted(
+        path for path in input_dir.iterdir()
+        if path.is_file() and path.name.lower().endswith(".csv")
+    )
     if not candidates:
-        raise InputError("Missing samples.csv")
+        raise InputError("Missing CSV sample table")
     if len(candidates) > 1:
-        raise InputError("Multiple samples.csv files were found")
+        names = ", ".join(path.name for path in candidates)
+        raise InputError(f"Multiple CSV sample tables were found: {names}")
     return candidates[0]
 
 
 def read_sample_columns(job_dir: Path) -> set[str]:
-    path = find_samples_csv(job_dir)
+    path = find_sample_sheet(job_dir)
     with path.open("r", encoding="utf-8-sig", newline="") as handle:
         return set(csv.DictReader(handle).fieldnames or [])
 
@@ -113,13 +118,13 @@ def resolve_quant_path(job_dir: Path, relative: str) -> Path:
 
 
 def read_samples(job_dir: Path) -> list[dict[str, Any]]:
-    path = find_samples_csv(job_dir)
+    path = find_sample_sheet(job_dir)
     with path.open("r", encoding="utf-8-sig", newline="") as handle:
         reader = csv.DictReader(handle)
         columns = set(reader.fieldnames or [])
         missing = STUDIO_COLUMNS - columns
         if missing:
-            raise InputError(f"samples.csv is missing columns: {', '.join(sorted(missing))}")
+            raise InputError(f"CSV sample table is missing columns: {', '.join(sorted(missing))}")
         rows = []
         seen_ids: set[str] = set()
         for line_number, row in enumerate(reader, 2):
@@ -127,7 +132,7 @@ def read_samples(job_dir: Path) -> list[dict[str, Any]]:
             condition = row["condition"].strip()
             quant_path = row["quant_path"].strip()
             if not sample_id or not condition or not quant_path:
-                raise InputError(f"samples.csv line {line_number} has empty required values")
+                raise InputError(f"CSV sample table line {line_number} has empty required values")
             if sample_id in seen_ids:
                 raise InputError(f"Duplicate sample_id: {sample_id}")
             seen_ids.add(sample_id)
@@ -149,7 +154,7 @@ def read_samples(job_dir: Path) -> list[dict[str, Any]]:
 
 
 def read_astk_samples(job_dir: Path) -> dict[str, dict[str, list[dict[str, Any]]]]:
-    path = find_samples_csv(job_dir)
+    path = find_sample_sheet(job_dir)
     groups: dict[str, dict[str, list[dict[str, Any]]]] = {}
     seen: set[tuple[str, str, str]] = set()
     with path.open("r", encoding="utf-8-sig", newline="") as handle:
@@ -157,7 +162,7 @@ def read_astk_samples(job_dir: Path) -> dict[str, dict[str, list[dict[str, Any]]
         columns = set(reader.fieldnames or [])
         missing = ASTK_COLUMNS - columns
         if missing:
-            raise InputError(f"samples.csv is missing columns: {', '.join(sorted(missing))}")
+            raise InputError(f"CSV sample table is missing columns: {', '.join(sorted(missing))}")
         for line_number, row in enumerate(reader, 2):
             group = row["group"].strip()
             condition = row["condition"].strip().lower()
@@ -165,15 +170,15 @@ def read_astk_samples(job_dir: Path) -> dict[str, dict[str, list[dict[str, Any]]
             source_path = row["path"].strip()
             replicate_text = row["replicate"].strip()
             if not group or not condition or not name or not source_path or not replicate_text:
-                raise InputError(f"samples.csv line {line_number} has empty required values")
+                raise InputError(f"CSV sample table line {line_number} has empty required values")
             if condition not in ASTK_CONDITIONS:
-                raise InputError(f"samples.csv line {line_number} condition must be ctrl or case")
+                raise InputError(f"CSV sample table line {line_number} condition must be ctrl or case")
             try:
                 replicate = int(replicate_text)
             except ValueError as error:
-                raise InputError(f"samples.csv line {line_number} has an invalid replicate") from error
+                raise InputError(f"CSV sample table line {line_number} has an invalid replicate") from error
             if replicate < 1:
-                raise InputError(f"samples.csv line {line_number} replicate must be at least 1")
+                raise InputError(f"CSV sample table line {line_number} replicate must be at least 1")
             key = (group, condition, name)
             if key in seen:
                 raise InputError(f"Duplicate sample in group {group}: {condition}/{name}")

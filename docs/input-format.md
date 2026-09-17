@@ -1,6 +1,7 @@
 # ASTK Studio 输入格式
 
-真实 ASTK 任务由一个数据 ZIP 和一个 `samples.csv` 组成。
+真实 ASTK 任务由一个数据 ZIP 和一个 CSV 样本表组成。CSV 文件名可以保留为
+`facial_11.csv` 等原始名称，不需要改成 `samples.csv`。
 
 ## 数据 ZIP
 
@@ -21,26 +22,28 @@ quant.zip
 Name  Length  EffectiveLength  TPM  NumReads
 ```
 
-## samples.csv
+## CSV 样本表
 
-模板可从 `/api/templates/samples.csv` 下载。字段定义如下：
+模板可从 `/api/templates/samples.csv` 下载，字段使用 ASTK 元数据格式：
 
 | 字段 | 必需 | 说明 |
 | --- | --- | --- |
-| `sample_id` | 是 | 唯一样本名称，用于结果列名 |
-| `condition` | 是 | 实验条件或发育阶段 |
-| `quant_path` | 是 | ZIP 内 `quant.sf` 的相对路径 |
-| `baseline` | 是 | 基线组填 `true`，其他组填 `false` |
-| `order` | 否 | 相邻阶段比较时的顺序数字 |
+| `group` | 是 | 比较组名称 |
+| `condition` | 是 | 样本角色，必须为 `ctrl` 或 `case` |
+| `name` | 是 | 唯一样本名称，用于结果列名 |
+| `path` | 是 | ZIP 内 `quant.sf` 的相对路径 |
+| `replicate` | 是 | 组内重复编号，从 1 开始 |
 
 示例：
 
 ```csv
-sample_id,condition,quant_path,baseline,order
-heart_e11_rep1,E11.5,quant/heart_e11_rep1/quant.sf,true,1
-heart_e11_rep2,E11.5,quant/heart_e11_rep2/quant.sf,true,1
-heart_e12_rep1,E12.5,quant/heart_e12_rep1/quant.sf,false,2
-heart_e12_rep2,E12.5,quant/heart_e12_rep2/quant.sf,false,2
+group,condition,name,path,replicate
+E11.5_vs_E12.5,ctrl,heart_e11_rep1,quant/heart_e11_rep1/quant.sf,1
+E11.5_vs_E12.5,ctrl,heart_e11_rep2,quant/heart_e11_rep2/quant.sf,2
+E11.5_vs_E12.5,case,heart_e12_rep1,quant/heart_e12_rep1/quant.sf,1
+E11.5_vs_E12.5,case,heart_e12_rep2,quant/heart_e12_rep2/quant.sf,2
 ```
 
-基线模式会生成 `E11_5_vs_E12_5` 这样的比较。不同条件可以拥有不同数量的生物学重复。
+同一任务的 Ctrl/Case 重复数必须一致。旧版网页的
+`sample_id,condition,quant_path,baseline,order` 格式仍可读取，但新任务建议使用上面的
+ASTK 原生格式。

@@ -64,11 +64,11 @@ class PipelineTests(unittest.TestCase):
             self.assertIn("dsflow", plan["command"])
             self.assertIn("0.1", plan["command"])
 
-    def test_planner_accepts_native_astk_samples_csv(self) -> None:
+    def test_planner_accepts_native_astk_csv_with_original_filename(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             job_dir = self.make_job(Path(temporary))
             input_dir = job_dir / "input"
-            (input_dir / "samples.csv").write_text(
+            (input_dir / "facial_11.CSV").write_text(
                 "group,condition,name,path,replicate\n"
                 "facial_11.5_12,case,e12_r1,quant/e12_r1/quant.sf,1\n"
                 "facial_11.5_12,ctrl,e11_r1,quant/e11_r1/quant.sf,1\n"
@@ -76,6 +76,7 @@ class PipelineTests(unittest.TestCase):
                 "facial_11.5_13,ctrl,e11_r1,quant/e11_r1/quant.sf,1\n",
                 encoding="utf-8",
             )
+            (input_dir / "samples.csv").unlink()
 
             plan = prepare_job(job_dir)
             metadata = json.loads((job_dir / "metadata" / "astk_metadata.json").read_text(encoding="utf-8"))
@@ -134,12 +135,15 @@ class PipelineTests(unittest.TestCase):
             with self.assertRaises(InputError):
                 safe_extract_zip(archive, root / "data")
 
-    def test_command_upload_requires_zip_and_samples_csv(self) -> None:
+    def test_command_upload_requires_zip_and_one_csv(self) -> None:
         validate_analysis_files([("quant.zip", b"zip"), ("samples.csv", b"csv")])
+        validate_analysis_files([("quant.zip", b"zip"), ("facial_11.csv", b"csv")])
         with self.assertRaises(ValueError):
             validate_analysis_files([("samples.csv", b"csv")])
         with self.assertRaises(ValueError):
-            validate_analysis_files([("quant.zip", b"zip"), ("metadata.csv", b"csv")])
+            validate_analysis_files([("quant.zip", b"zip"), ("facial_11.csv", b"csv"), ("extra.csv", b"csv")])
+        with self.assertRaises(ValueError):
+            validate_analysis_files([("quant.zip", b"zip"), ("metadata.txt", b"text")])
 
     def test_cleanup_removes_only_expired_finished_jobs(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
