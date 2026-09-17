@@ -36,12 +36,18 @@ def slug(value: str) -> str:
 
 def load_references() -> dict[str, dict[str, str]]:
     custom = os.getenv("ASTK_REFERENCE_CONFIG")
-    if not custom:
-        return DEFAULT_REFERENCES
-    path = Path(custom)
-    if not path.exists():
-        raise InputError(f"Reference configuration does not exist: {path}")
-    return json.loads(path.read_text(encoding="utf-8"))
+    if custom:
+        path = Path(custom)
+        if not path.exists():
+            raise InputError(f"Reference configuration does not exist: {path}")
+        references = json.loads(path.read_text(encoding="utf-8"))
+    else:
+        references = {name: dict(value) for name, value in DEFAULT_REFERENCES.items()}
+    if mm10_gtf := os.getenv("ASTK_MM10_GTF"):
+        references["Mus musculus · mm10"]["gtf"] = mm10_gtf
+    if hg38_gtf := os.getenv("ASTK_HG38_GTF"):
+        references["Homo sapiens · hg38"]["gtf"] = hg38_gtf
+    return references
 
 
 def safe_extract_zip(archive: Path, destination: Path) -> None:
@@ -168,8 +174,8 @@ def write_metadata(job_dir: Path, samples: list[dict[str, Any]], comparisons: li
     csv_rows: list[dict[str, Any]] = []
     for control, treatment in comparisons:
         group_name = f"{slug(control)}_vs_{slug(treatment)}"
-        payload[group_name] = {"control": {"samples": []}, "treatment": {"samples": []}}
-        for role, condition in (("control", control), ("treatment", treatment)):
+        payload[group_name] = {"ctrl": {"samples": []}, "case": {"samples": []}}
+        for role, condition in (("ctrl", control), ("case", treatment)):
             for replicate, sample in enumerate(grouped[condition], 1):
                 item = {
                     "name": sample["sample_id"],
@@ -195,6 +201,14 @@ def prepare_job(job_dir: Path, require_reference: bool = False) -> dict[str, Any
     samples = read_samples(job_dir)
     mode = config.get("comparison_mode", "baseline")
     comparisons = make_comparisons(samples, mode)
+    if os.getenv("ASTK_REQUIRE_EQUAL_REPLICATES", "0").lower() in TRUTHY:
+        counts = defaultdict(int)
+        for sample in samples:
+            counts[sample["condition"]] += 1
+        unequal = [(control, treatment) for control, treatment in comparisons if counts[control] != counts[treatment]]
+        if unequal:
+            pairs = ", ".join(f"{control} vs {treatment}" for control, treatment in unequal)
+            raise InputError(f"This ASTK installation requires equal replicate counts: {pairs}")
     metadata_json, metadata_csv = write_metadata(job_dir, samples, comparisons)
     references = load_references()
     species = config.get("species")
@@ -220,7 +234,10 @@ def prepare_job(job_dir: Path, require_reference: bool = False) -> dict[str, Any
         "species": species,
         "reference": reference,
         "sample_count": len(samples),
-        "comparisons": [{"control": c, "treatment": t} for c, t in comparisons],
+        "comparisons": [
+            {"group": f"{slug(c)}_vs_{slug(t)}", "control": c, "treatment": t}
+            for c, t in comparisons
+        ],
         "metadata_json": relative_job_path(job_dir, metadata_json),
         "metadata_csv": relative_job_path(job_dir, metadata_csv),
         "command": command,

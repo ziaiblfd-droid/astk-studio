@@ -41,7 +41,7 @@ def cleanup_expired_jobs(
             job = json.loads(job_path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
             continue
-        if job.get("status") in ACTIVE_STATUSES:
+        if job.get("pinned") or job.get("status") in ACTIVE_STATUSES:
             continue
         timestamp = parse_timestamp(job.get("updated_at")) or parse_timestamp(job.get("created_at"))
         if timestamp is None or timestamp >= cutoff:

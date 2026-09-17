@@ -10,6 +10,7 @@ from pathlib import Path
 from backend.cleanup import cleanup_expired_jobs
 from backend.planner import InputError, prepare_job, safe_extract_zip
 from backend.result_parser import parse_results
+from backend.server import validate_analysis_files
 
 
 QUANT = "Name\tLength\tEffectiveLength\tTPM\tNumReads\nTX1\t1000\t800\t12.5\t10\n"
@@ -57,8 +58,9 @@ class PipelineTests(unittest.TestCase):
             metadata = json.loads((job_dir / "metadata" / "astk_metadata.json").read_text(encoding="utf-8"))
             self.assertEqual(plan["sample_count"], 4)
             self.assertEqual(len(plan["comparisons"]), 2)
-            self.assertEqual(len(metadata["E11_5_vs_E12_5"]["control"]["samples"]), 2)
-            self.assertEqual(len(metadata["E11_5_vs_E12_5"]["treatment"]["samples"]), 1)
+            self.assertEqual(len(metadata["E11_5_vs_E12_5"]["ctrl"]["samples"]), 2)
+            self.assertEqual(len(metadata["E11_5_vs_E12_5"]["case"]["samples"]), 1)
+            self.assertEqual(plan["comparisons"][0]["group"], "E11_5_vs_E12_5")
             self.assertIn("dsflow", plan["command"])
             self.assertIn("0.1", plan["command"])
 
@@ -69,6 +71,7 @@ class PipelineTests(unittest.TestCase):
             analysis = job_dir / "output" / "analysis"
             (analysis / "psi").mkdir(parents=True)
             (analysis / "sig01").mkdir(parents=True)
+            (analysis / "img" / "volcano").mkdir(parents=True)
             (analysis / "psi" / "E11_5_vs_E12_5_SE_c1.psi").write_text(
                 "event_id\te11_r1\te11_r2\n"
                 "GENE1;SE:chr1:10-20:30-40:+\t0.1\t0.2\n"
@@ -85,12 +88,17 @@ class PipelineTests(unittest.TestCase):
                 "GENE2;SE:chr1:50-60:70-80:+\t-0.15\t0.02\n",
                 encoding="utf-8",
             )
+            (analysis / "img" / "volcano" / "E11_5_vs_E12_5_SE.png").write_bytes(b"png")
             results = parse_results(job_dir)
             self.assertEqual(results["metrics"]["total_events"], 3)
             self.assertEqual(results["metrics"]["significant_events"], 2)
             self.assertEqual(results["metrics"]["sample_count"], 4)
             self.assertEqual(results["event_counts"]["SE"], 2)
             self.assertEqual(results["direction_counts"], {"up": 1, "down": 1})
+            self.assertEqual(results["images"]["volcano"][0]["name"], "E11_5_vs_E12_5_SE")
+            self.assertEqual(results["comparisons"][0]["control"], "E11.5")
+            self.assertEqual(results["events"][0][3], "E11.5 → E12.5")
+            self.assertEqual(results["reference"]["id"], "mm10-gencode-m25")
 
     def test_zip_traversal_is_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -101,6 +109,13 @@ class PipelineTests(unittest.TestCase):
             with self.assertRaises(InputError):
                 safe_extract_zip(archive, root / "data")
 
+    def test_command_upload_requires_zip_and_samples_csv(self) -> None:
+        validate_analysis_files([("quant.zip", b"zip"), ("samples.csv", b"csv")])
+        with self.assertRaises(ValueError):
+            validate_analysis_files([("samples.csv", b"csv")])
+        with self.assertRaises(ValueError):
+            validate_analysis_files([("quant.zip", b"zip"), ("metadata.csv", b"csv")])
+
     def test_cleanup_removes_only_expired_finished_jobs(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -108,7 +123,8 @@ class PipelineTests(unittest.TestCase):
             expired = root / "ASTK-EXPIRED"
             current = root / "ASTK-CURRENT"
             active = root / "ASTK-ACTIVE"
-            for directory in (expired, current, active):
+            pinned = root / "ASTK-PINNED"
+            for directory in (expired, current, active, pinned):
                 directory.mkdir()
 
             old_timestamp = (now - timedelta(days=8)).isoformat()
@@ -122,6 +138,9 @@ class PipelineTests(unittest.TestCase):
             (active / "job.json").write_text(
                 json.dumps({"status": "running", "updated_at": old_timestamp}), encoding="utf-8"
             )
+            (pinned / "job.json").write_text(
+                json.dumps({"status": "completed", "updated_at": old_timestamp, "pinned": True}), encoding="utf-8"
+            )
 
             removed = cleanup_expired_jobs(root, retention_days=7, now=now)
 
@@ -129,6 +148,7 @@ class PipelineTests(unittest.TestCase):
             self.assertFalse(expired.exists())
             self.assertTrue(current.exists())
             self.assertTrue(active.exists())
+            self.assertTrue(pinned.exists())
 
 
 if __name__ == "__main__":

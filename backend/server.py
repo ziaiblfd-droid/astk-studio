@@ -12,7 +12,7 @@ from datetime import datetime
 from http import HTTPStatus
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import unquote, urlparse
 
 if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -82,6 +82,14 @@ def parse_multipart(body: bytes, content_type: str) -> tuple[dict[str, str], lis
     return fields, files
 
 
+def validate_analysis_files(files: list[tuple[str, bytes]]) -> None:
+    names = [name.lower() for name, _ in files]
+    archives = [name for name in names if name.endswith(".zip")]
+    sample_sheets = [name for name in names if name == "samples.csv"]
+    if len(archives) != 1 or len(sample_sheets) != 1 or len(files) != 2:
+        raise ValueError("Upload exactly one ZIP data package and one samples.csv")
+
+
 class ASTKHandler(SimpleHTTPRequestHandler):
     server_version = "ASTKStudio/0.1"
 
@@ -107,6 +115,15 @@ class ASTKHandler(SimpleHTTPRequestHandler):
             return
         if parsed.path == "/api/templates/samples.csv":
             self.send_download(ROOT / "templates" / "samples.csv", filename="samples.csv")
+            return
+        file_match = re.fullmatch(r"/api/jobs/([A-Za-z0-9-]+)/files/(.+)", parsed.path)
+        if file_match:
+            job_root = STORE.job_dir(file_match.group(1)).resolve()
+            path = (job_root / unquote(file_match.group(2))).resolve()
+            if job_root not in path.parents or not path.is_file():
+                self.send_json({"error": "File not found"}, 404)
+            else:
+                self.send_file(path)
             return
         job_match = re.fullmatch(r"/api/jobs/([A-Za-z0-9-]+)", parsed.path)
         if job_match:
@@ -147,6 +164,12 @@ class ASTKHandler(SimpleHTTPRequestHandler):
         except (ValueError, json.JSONDecodeError) as exc:
             self.send_json({"error": f"Invalid request: {exc}"}, 400)
             return
+        if os.getenv("ASTK_EXECUTION_MODE", "demo").lower() == "command":
+            try:
+                validate_analysis_files(files)
+            except ValueError as exc:
+                self.send_json({"error": str(exc)}, 400)
+                return
         job_id = make_job_id()
         config["files"] = [name for name, _ in files] or config.get("files", [])
         if not files:
@@ -168,6 +191,16 @@ class ASTKHandler(SimpleHTTPRequestHandler):
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Disposition", f'attachment; filename="{filename or path.name}"')
         self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+
+    def send_file(self, path: Path) -> None:
+        data = path.read_bytes()
+        content_type = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
+        self.send_response(200)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(data)))
+        self.send_header("Cache-Control", "private, max-age=300")
         self.end_headers()
         self.wfile.write(data)
 

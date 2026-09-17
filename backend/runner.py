@@ -92,7 +92,9 @@ def run_job(store: JobStore, job_id: str) -> None:
         store.update(job_id, status="completed", stage="Completed", progress=100, stages=completed)
         _build_archive(job_dir)
     except Exception as exc:
-        (job_dir / "output" / "runner.log").write_text(str(exc), encoding="utf-8")
+        log_path = job_dir / "output" / "runner.log"
+        with log_path.open("a", encoding="utf-8") as handle:
+            handle.write(f"\nASTK Studio error: {exc}\n")
         store.update(job_id, status="failed", stage="Failed", error=str(exc))
 
 

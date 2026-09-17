@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+APP_DIR="${ASTK_STUDIO_DIR:-$HOME/astk-studio}"
+CONDA_ENV="${ASTK_CONDA_ENV:-astk}"
+CONDA_BASE="${CONDA_BASE:-$HOME/miniconda3}"
+
+source "$CONDA_BASE/etc/profile.d/conda.sh"
+conda activate "$CONDA_ENV"
+cd "$APP_DIR"
+
+export ASTK_HOST="${ASTK_HOST:-127.0.0.1}"
+export ASTK_PORT="${ASTK_PORT:-4173}"
+export ASTK_STUDIO_DIR="$APP_DIR"
+export ASTK_EXECUTION_MODE="command"
+export ASTK_RUNNER_COMMAND="$APP_DIR/scripts/run-astk-job.sh {job_dir}"
+export ASTK_MM10_GTF="${ASTK_MM10_GTF:-/home/yushiye/project/gencode.vM25.annotation.gtf}"
+export ASTK_REQUIRE_EQUAL_REPLICATES="${ASTK_REQUIRE_EQUAL_REPLICATES:-1}"
+export ASTK_WORKERS="${ASTK_WORKERS:-1}"
+export ASTK_JOB_TIMEOUT="${ASTK_JOB_TIMEOUT:-21600}"
+export ASTK_RETENTION_DAYS="${ASTK_RETENTION_DAYS:-7}"
+export PYTHONPATH="$APP_DIR"
+
+exec python3 backend/server.py

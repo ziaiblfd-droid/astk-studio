@@ -12,6 +12,7 @@ from typing import Any
 
 EVENT_TYPES = ("A3", "A5", "AF", "AL", "MX", "RI", "SE")
 EVENT_PATTERN = re.compile(r";(A3|A5|AF|AL|MX|RI|SE):")
+IMAGE_CATEGORIES = ("bar", "PCA", "heatmap", "volcano", "upset")
 
 
 def event_type(event_id: str, fallback: str = "") -> str:
@@ -99,8 +100,45 @@ def count_samples(metadata_path: Path) -> int:
     return len(names)
 
 
+def collect_images(job_dir: Path) -> dict[str, list[dict[str, str]]]:
+    analysis_dir = job_dir / "output" / "analysis"
+    images: dict[str, list[dict[str, str]]] = {}
+    for category in IMAGE_CATEGORIES:
+        directory = analysis_dir / "img" / category
+        if not directory.exists():
+            continue
+        items = []
+        for path in sorted(directory.glob("*.png")):
+            items.append(
+                {
+                    "name": path.stem,
+                    "path": path.relative_to(job_dir).as_posix(),
+                }
+            )
+        if items:
+            images[category.lower()] = items
+    return images
+
+
+def load_plan(job_dir: Path) -> dict[str, Any]:
+    path = job_dir / "plan.json"
+    if not path.exists():
+        return {}
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return {}
+
+
 def parse_results(job_dir: Path, gtf_path: Path | None = None, preview_limit: int = 5000) -> dict[str, Any]:
     analysis_dir = job_dir / "output" / "analysis"
+    plan = load_plan(job_dir)
+    comparisons = plan.get("comparisons", [])
+    comparison_labels = {
+        item["group"]: f'{item["control"]} → {item["treatment"]}'
+        for item in comparisons
+        if all(item.get(key) for key in ("group", "control", "treatment"))
+    }
     gene_names = load_gene_names(gtf_path)
     events_by_type: dict[str, set[str]] = defaultdict(set)
     for path in (analysis_dir / "psi").glob("*.psi"):
@@ -110,6 +148,7 @@ def parse_results(job_dir: Path, gtf_path: Path | None = None, preview_limit: in
     seen_significant: set[tuple[str, str]] = set()
     for path in sorted((analysis_dir / "sig01").glob("*.sig.dpsi")):
         for row in parse_significant(path, gene_names):
+            row[3] = comparison_labels.get(row[3], row[3].replace("_vs_", " → "))
             key = (row[0], row[3])
             if key not in seen_significant:
                 seen_significant.add(key)
@@ -135,6 +174,9 @@ def parse_results(job_dir: Path, gtf_path: Path | None = None, preview_limit: in
         },
         "events": significant_rows[:preview_limit],
         "events_truncated": len(significant_rows) > preview_limit,
+        "images": collect_images(job_dir),
+        "comparisons": comparisons,
+        "reference": plan.get("reference", {}),
         "mode": "astk",
     }
     output = job_dir / "output" / "results.json"
