@@ -1,0 +1,10 @@
+{
+  "Mus musculus · mm10": {
+    "id": "mm10-gencode-m25",
+    "gtf": "/refs/mm10/gencode.vM25.annotation.gtf"
+  },
+  "Homo sapiens · hg38": {
+    "id": "hg38-gencode-v44",
+    "gtf": "/refs/hg38/gencode.v44.annotation.gtf"
+  }
+}

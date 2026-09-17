@@ -1,0 +1,23 @@
+.template-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 14px;
+  color: var(--green-dark);
+  font-size: 10px;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.template-link svg {
+  width: 14px;
+}
+
+.template-link:hover {
+  text-decoration: underline;
+}
+
+.status-dot.demo-mode {
+  background: var(--yellow);
+  box-shadow: 0 0 0 3px rgba(234, 182, 75, 0.14);
+}

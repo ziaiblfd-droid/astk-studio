@@ -1,0 +1,22 @@
+services:
+  astk-studio:
+    build:
+      context: .
+    image: astk-studio:latest
+    restart: unless-stopped
+    ports:
+      - "4173:4173"
+    environment:
+      ASTK_EXECUTION_MODE: command
+      ASTK_RUNNER_COMMAND: /opt/astk-studio/scripts/run-astk-job.sh {job_dir}
+      ASTK_WORKERS: 1
+      ASTK_JOB_TIMEOUT: 21600
+      ASTK_MAX_UPLOAD_BYTES: 536870912
+      ASTK_RETENTION_DAYS: 7
+      ASTK_CLEANUP_INTERVAL: 3600
+    volumes:
+      - astk_jobs:/opt/astk-studio/data
+      - ./references:/refs:ro
+
+volumes:
+  astk_jobs:

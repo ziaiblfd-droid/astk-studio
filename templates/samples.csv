@@ -1,0 +1,7 @@
+sample_id,condition,quant_path,baseline,order
+heart_e11_rep1,E11.5,quant/heart_e11_rep1/quant.sf,true,1
+heart_e11_rep2,E11.5,quant/heart_e11_rep2/quant.sf,true,1
+heart_e12_rep1,E12.5,quant/heart_e12_rep1/quant.sf,false,2
+heart_e12_rep2,E12.5,quant/heart_e12_rep2/quant.sf,false,2
+heart_e13_rep1,E13.5,quant/heart_e13_rep1/quant.sf,false,3
+heart_e13_rep2,E13.5,quant/heart_e13_rep2/quant.sf,false,3
