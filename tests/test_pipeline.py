@@ -70,10 +70,10 @@ class PipelineTests(unittest.TestCase):
             input_dir = job_dir / "input"
             (input_dir / "facial_11.CSV").write_text(
                 "group,condition,name,path,replicate\n"
-                "facial_11.5_12,case,e12_r1,quant/e12_r1/quant.sf,1\n"
-                "facial_11.5_12,ctrl,e11_r1,quant/e11_r1/quant.sf,1\n"
-                "facial_11.5_13,case,e13_r1,quant/e13_r1/quant.sf,1\n"
-                "facial_11.5_13,ctrl,e11_r1,quant/e11_r1/quant.sf,1\n",
+                "facial_11.5_12,case,e12_r1,./salmon/quant/e12_r1/quant.sf,1\n"
+                "facial_11.5_12,ctrl,e11_r1,./salmon/quant/e11_r1/quant.sf,1\n"
+                "facial_11.5_13,case,e13_r1,./salmon/quant/e13_r1/quant.sf,1\n"
+                "facial_11.5_13,ctrl,e11_r1,./salmon/quant/e11_r1/quant.sf,1\n",
                 encoding="utf-8",
             )
             (input_dir / "samples.csv").unlink()

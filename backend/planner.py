@@ -110,10 +110,21 @@ def resolve_quant_path(job_dir: Path, relative: str) -> Path:
     clean = Path(relative.replace("\\", "/"))
     if clean.is_absolute() or ".." in clean.parts:
         raise InputError(f"quant_path must be relative: {relative}")
-    candidates = [job_dir / "input" / "data" / clean, job_dir / "input" / clean]
+    data_dir = job_dir / "input" / "data"
+    candidates = [data_dir / clean, job_dir / "input" / clean]
     for candidate in candidates:
         if candidate.exists():
             return candidate.resolve()
+    if len(clean.parts) >= 2:
+        requested_sample = clean.parts[-2]
+        matches = sorted(
+            path for path in data_dir.rglob(clean.name)
+            if path.is_file() and path.parent.name == requested_sample
+        )
+        if len(matches) == 1:
+            return matches[0].resolve()
+        if len(matches) > 1:
+            raise InputError(f"quant_path is ambiguous in the uploaded data: {relative}")
     raise InputError(f"quant_path was not found in the uploaded data: {relative}")
 
 
