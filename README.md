@@ -24,7 +24,9 @@
 - **GitHub Pages**：公开的论文数据与交互演示，不上传数据、不执行 ASTK。
 - **Docker 自托管**：研究者在自己的 Linux 环境执行真实 ASTK 分析。
 
-详细方案见 [docs/deployment-options.md](docs/deployment-options.md)。推送到 `main` 后，GitHub Actions 会自动构建并发布静态站点。
+详细方案见 [docs/deployment-options.md](docs/deployment-options.md)。仓库处于私有开发阶段时，
+Pages 工作流仅支持手动触发；正式公开前先在仓库设置中启用 GitHub Pages，再运行
+`Deploy GitHub Pages` 工作流。公开发布后可按需要恢复 `main` 分支自动部署。
 
 ## 本地打开
 

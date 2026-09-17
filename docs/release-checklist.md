@@ -8,6 +8,7 @@
 - [ ] Confirm the paper citation, DOI, and dataset links.
 - [ ] Review `README.md`, `LICENSE`, `SECURITY.md`, and `CONTRIBUTING.md`.
 - [ ] Enable GitHub Pages with GitHub Actions as the source.
+- [ ] Restore automatic Pages deployment on pushes to `main` when the repository is ready for public release.
 
 ## Validation
 
