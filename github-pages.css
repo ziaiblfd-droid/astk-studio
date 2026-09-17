@@ -46,3 +46,24 @@
   align-items: flex-end;
   justify-content: center;
 }
+
+.file-remove {
+  width: 28px;
+  height: 28px;
+  margin-left: auto;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: #87958f;
+}
+
+.file-remove:hover {
+  background: #fff0ee;
+  color: var(--coral);
+}
+
+.file-remove svg {
+  width: 15px;
+}

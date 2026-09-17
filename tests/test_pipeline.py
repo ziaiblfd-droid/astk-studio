@@ -64,6 +64,31 @@ class PipelineTests(unittest.TestCase):
             self.assertIn("dsflow", plan["command"])
             self.assertIn("0.1", plan["command"])
 
+    def test_planner_accepts_native_astk_samples_csv(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            job_dir = self.make_job(Path(temporary))
+            input_dir = job_dir / "input"
+            (input_dir / "samples.csv").write_text(
+                "group,condition,name,path,replicate\n"
+                "facial_11.5_12,case,e12_r1,quant/e12_r1/quant.sf,1\n"
+                "facial_11.5_12,ctrl,e11_r1,quant/e11_r1/quant.sf,1\n"
+                "facial_11.5_13,case,e13_r1,quant/e13_r1/quant.sf,1\n"
+                "facial_11.5_13,ctrl,e11_r1,quant/e11_r1/quant.sf,1\n",
+                encoding="utf-8",
+            )
+
+            plan = prepare_job(job_dir)
+            metadata = json.loads((job_dir / "metadata" / "astk_metadata.json").read_text(encoding="utf-8"))
+            metadata_csv = (job_dir / "metadata" / "astk_metadata.csv").read_text(encoding="utf-8")
+
+            self.assertEqual(plan["input_format"], "astk")
+            self.assertEqual(plan["sample_count"], 3)
+            self.assertEqual([item["group"] for item in plan["comparisons"]], ["facial_11.5_12", "facial_11.5_13"])
+            self.assertEqual(metadata["facial_11.5_12"]["ctrl"]["samples"][0]["name"], "e11_r1")
+            self.assertEqual(metadata["facial_11.5_12"]["case"]["samples"][0]["name"], "e12_r1")
+            self.assertTrue(metadata["facial_11.5_12"]["case"]["samples"][0]["path"].endswith("quant/e12_r1/quant.sf"))
+            self.assertEqual(metadata_csv.splitlines()[0], "group,condition,name,path,replicate")
+
     def test_result_parser_summarizes_astk_outputs(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             job_dir = self.make_job(Path(temporary))

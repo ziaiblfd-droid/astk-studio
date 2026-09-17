@@ -135,9 +135,9 @@ def parse_results(job_dir: Path, gtf_path: Path | None = None, preview_limit: in
     plan = load_plan(job_dir)
     comparisons = plan.get("comparisons", [])
     comparison_labels = {
-        item["group"]: f'{item["control"]} → {item["treatment"]}'
+        item["group"]: item.get("label") or f'{item["control"]} → {item["treatment"]}'
         for item in comparisons
-        if all(item.get(key) for key in ("group", "control", "treatment"))
+        if item.get("group") and (item.get("label") or all(item.get(key) for key in ("control", "treatment")))
     }
     gene_names = load_gene_names(gtf_path)
     events_by_type: dict[str, set[str]] = defaultdict(set)

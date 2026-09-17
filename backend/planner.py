@@ -11,7 +11,9 @@ from pathlib import Path
 from typing import Any
 
 
-REQUIRED_COLUMNS = {"sample_id", "condition", "quant_path", "baseline"}
+STUDIO_COLUMNS = {"sample_id", "condition", "quant_path", "baseline"}
+ASTK_COLUMNS = {"group", "condition", "name", "path", "replicate"}
+ASTK_CONDITIONS = {"ctrl", "case"}
 TRUTHY = {"1", "true", "yes", "y", "baseline", "control"}
 DEFAULT_REFERENCES = {
     "Mus musculus · mm10": {
@@ -83,6 +85,12 @@ def find_samples_csv(job_dir: Path) -> Path:
     return candidates[0]
 
 
+def read_sample_columns(job_dir: Path) -> set[str]:
+    path = find_samples_csv(job_dir)
+    with path.open("r", encoding="utf-8-sig", newline="") as handle:
+        return set(csv.DictReader(handle).fieldnames or [])
+
+
 def validate_quant_file(path: Path) -> None:
     if not path.exists() or not path.is_file():
         raise InputError(f"quant.sf does not exist: {path}")
@@ -109,7 +117,7 @@ def read_samples(job_dir: Path) -> list[dict[str, Any]]:
     with path.open("r", encoding="utf-8-sig", newline="") as handle:
         reader = csv.DictReader(handle)
         columns = set(reader.fieldnames or [])
-        missing = REQUIRED_COLUMNS - columns
+        missing = STUDIO_COLUMNS - columns
         if missing:
             raise InputError(f"samples.csv is missing columns: {', '.join(sorted(missing))}")
         rows = []
@@ -138,6 +146,54 @@ def read_samples(job_dir: Path) -> list[dict[str, Any]]:
     if len(rows) < 2:
         raise InputError("At least two samples are required")
     return rows
+
+
+def read_astk_samples(job_dir: Path) -> dict[str, dict[str, list[dict[str, Any]]]]:
+    path = find_samples_csv(job_dir)
+    groups: dict[str, dict[str, list[dict[str, Any]]]] = {}
+    seen: set[tuple[str, str, str]] = set()
+    with path.open("r", encoding="utf-8-sig", newline="") as handle:
+        reader = csv.DictReader(handle)
+        columns = set(reader.fieldnames or [])
+        missing = ASTK_COLUMNS - columns
+        if missing:
+            raise InputError(f"samples.csv is missing columns: {', '.join(sorted(missing))}")
+        for line_number, row in enumerate(reader, 2):
+            group = row["group"].strip()
+            condition = row["condition"].strip().lower()
+            name = row["name"].strip()
+            source_path = row["path"].strip()
+            replicate_text = row["replicate"].strip()
+            if not group or not condition or not name or not source_path or not replicate_text:
+                raise InputError(f"samples.csv line {line_number} has empty required values")
+            if condition not in ASTK_CONDITIONS:
+                raise InputError(f"samples.csv line {line_number} condition must be ctrl or case")
+            try:
+                replicate = int(replicate_text)
+            except ValueError as error:
+                raise InputError(f"samples.csv line {line_number} has an invalid replicate") from error
+            if replicate < 1:
+                raise InputError(f"samples.csv line {line_number} replicate must be at least 1")
+            key = (group, condition, name)
+            if key in seen:
+                raise InputError(f"Duplicate sample in group {group}: {condition}/{name}")
+            seen.add(key)
+            resolved = resolve_quant_path(job_dir, source_path)
+            validate_quant_file(resolved)
+            roles = groups.setdefault(group, {"ctrl": [], "case": []})
+            roles[condition].append({"name": name, "replicate": replicate, "path": resolved})
+    if not groups:
+        raise InputError("At least one ASTK comparison group is required")
+    for group, roles in groups.items():
+        for condition in ASTK_CONDITIONS:
+            samples = roles[condition]
+            if not samples:
+                raise InputError(f"ASTK group {group} must include both ctrl and case samples")
+            replicates = [sample["replicate"] for sample in samples]
+            if len(replicates) != len(set(replicates)):
+                raise InputError(f"Duplicate replicate number in {group}/{condition}")
+            samples.sort(key=lambda sample: sample["replicate"])
+    return groups
 
 
 def make_comparisons(samples: list[dict[str, Any]], mode: str = "baseline") -> list[tuple[str, str]]:
@@ -194,22 +250,83 @@ def write_metadata(job_dir: Path, samples: list[dict[str, Any]], comparisons: li
     return json_path, csv_path
 
 
+def native_comparison_label(group: str) -> tuple[str, str, str]:
+    if "_vs_" in group:
+        control, treatment = group.split("_vs_", 1)
+        if control and treatment:
+            return control, treatment, f"{control} → {treatment}"
+    return "ctrl", "case", group
+
+
+def write_astk_metadata(
+    job_dir: Path, groups: dict[str, dict[str, list[dict[str, Any]]]]
+) -> tuple[Path, Path, list[dict[str, str]]]:
+    metadata_dir = job_dir / "metadata"
+    metadata_dir.mkdir(parents=True, exist_ok=True)
+    payload: dict[str, Any] = {}
+    csv_rows: list[dict[str, Any]] = []
+    comparisons: list[dict[str, str]] = []
+    for group, roles in groups.items():
+        payload[group] = {"ctrl": {"samples": []}, "case": {"samples": []}}
+        control, treatment, label = native_comparison_label(group)
+        comparisons.append({"group": group, "control": control, "treatment": treatment, "label": label})
+        for condition in ("ctrl", "case"):
+            for sample in roles[condition]:
+                item = {
+                    "name": sample["name"],
+                    "replicate": sample["replicate"],
+                    "path": relative_job_path(job_dir, sample["path"]),
+                }
+                payload[group][condition]["samples"].append(item)
+                csv_rows.append({"group": group, "condition": condition, **item})
+    json_path = metadata_dir / "astk_metadata.json"
+    csv_path = metadata_dir / "astk_metadata.csv"
+    json_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    with csv_path.open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=["group", "condition", "name", "path", "replicate"])
+        writer.writeheader()
+        writer.writerows(csv_rows)
+    return json_path, csv_path, comparisons
+
+
 def prepare_job(job_dir: Path, require_reference: bool = False) -> dict[str, Any]:
     job = json.loads((job_dir / "job.json").read_text(encoding="utf-8"))
     config = job["config"]
     prepare_input_tree(job_dir)
-    samples = read_samples(job_dir)
-    mode = config.get("comparison_mode", "baseline")
-    comparisons = make_comparisons(samples, mode)
-    if os.getenv("ASTK_REQUIRE_EQUAL_REPLICATES", "0").lower() in TRUTHY:
-        counts = defaultdict(int)
-        for sample in samples:
-            counts[sample["condition"]] += 1
-        unequal = [(control, treatment) for control, treatment in comparisons if counts[control] != counts[treatment]]
-        if unequal:
-            pairs = ", ".join(f"{control} vs {treatment}" for control, treatment in unequal)
-            raise InputError(f"This ASTK installation requires equal replicate counts: {pairs}")
-    metadata_json, metadata_csv = write_metadata(job_dir, samples, comparisons)
+    columns = read_sample_columns(job_dir)
+    native_astk_input = ASTK_COLUMNS.issubset(columns)
+    if native_astk_input:
+        groups = read_astk_samples(job_dir)
+        if os.getenv("ASTK_REQUIRE_EQUAL_REPLICATES", "0").lower() in TRUTHY:
+            unequal = [
+                group for group, roles in groups.items()
+                if len(roles["ctrl"]) != len(roles["case"])
+            ]
+            if unequal:
+                raise InputError(
+                    "This ASTK installation requires equal replicate counts: " + ", ".join(unequal)
+                )
+        metadata_json, metadata_csv, plan_comparisons = write_astk_metadata(job_dir, groups)
+        sample_count = len({sample["name"] for roles in groups.values() for samples in roles.values() for sample in samples})
+    else:
+        samples = read_samples(job_dir)
+        mode = config.get("comparison_mode", "baseline")
+        comparisons = make_comparisons(samples, mode)
+        if os.getenv("ASTK_REQUIRE_EQUAL_REPLICATES", "0").lower() in TRUTHY:
+            counts = defaultdict(int)
+            for sample in samples:
+                counts[sample["condition"]] += 1
+            unequal = [(control, treatment) for control, treatment in comparisons if counts[control] != counts[treatment]]
+            if unequal:
+                pairs = ", ".join(f"{control} vs {treatment}" for control, treatment in unequal)
+                raise InputError(f"This ASTK installation requires equal replicate counts: {pairs}")
+        metadata_json, metadata_csv = write_metadata(job_dir, samples, comparisons)
+        plan_comparisons = [
+            {"group": f"{slug(control)}_vs_{slug(treatment)}", "control": control, "treatment": treatment,
+             "label": f"{control} → {treatment}"}
+            for control, treatment in comparisons
+        ]
+        sample_count = len(samples)
     references = load_references()
     species = config.get("species")
     if species not in references:
@@ -233,11 +350,9 @@ def prepare_job(job_dir: Path, require_reference: bool = False) -> dict[str, Any
         "version": 1,
         "species": species,
         "reference": reference,
-        "sample_count": len(samples),
-        "comparisons": [
-            {"group": f"{slug(c)}_vs_{slug(t)}", "control": c, "treatment": t}
-            for c, t in comparisons
-        ],
+        "input_format": "astk" if native_astk_input else "studio",
+        "sample_count": sample_count,
+        "comparisons": plan_comparisons,
         "metadata_json": relative_job_path(job_dir, metadata_json),
         "metadata_csv": relative_job_path(job_dir, metadata_csv),
         "command": command,
