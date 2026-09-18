@@ -1,0 +1,23 @@
+[Unit]
+Description=ASTK Studio web service
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=yushiye
+Group=yushiye
+WorkingDirectory=/home/yushiye/astk-studio
+Environment=ASTK_HOST=127.0.0.1
+Environment=ASTK_PORT=4173
+Environment=ASTK_EXECUTION_MODE=command
+Environment=ASTK_WORKERS=1
+Environment=ASTK_RETENTION_DAYS=7
+Environment=ASTK_MAX_UPLOAD_BYTES=536870912
+Environment=ASTK_TRUST_PROXY=1
+ExecStart=/home/yushiye/astk-studio/scripts/run-conda-server.sh
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

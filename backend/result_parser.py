@@ -183,6 +183,10 @@ def parse_results(job_dir: Path, gtf_path: Path | None = None, preview_limit: in
                 significant_rows.append(row)
     dpsi_values = [abs(float(row[5])) for row in significant_rows]
     event_counts = {kind: len(events_by_type.get(kind, set())) for kind in EVENT_TYPES}
+    significant_event_counts = {
+        kind: len({row[0] for row in significant_rows if row[2] == kind})
+        for kind in EVENT_TYPES
+    }
     if not any(event_counts.values()):
         for path in (analysis_dir / "ref").glob("*_strict.ioe"):
             for event_id in read_event_ids(path):
@@ -196,6 +200,7 @@ def parse_results(job_dir: Path, gtf_path: Path | None = None, preview_limit: in
             "median_abs_dpsi": round(statistics.median(dpsi_values), 4) if dpsi_values else 0,
         },
         "event_counts": event_counts,
+        "significant_event_counts": significant_event_counts,
         "direction_counts": {
             "up": sum(float(row[5]) > 0 for row in significant_rows),
             "down": sum(float(row[5]) < 0 for row in significant_rows),

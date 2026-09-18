@@ -32,6 +32,7 @@ STORE = JobStore(ROOT / "data" / "jobs")
 MAX_UPLOAD_BYTES = int(os.getenv("ASTK_MAX_UPLOAD_BYTES", str(512 * 1024 * 1024)))
 RETENTION_DAYS = float(os.getenv("ASTK_RETENTION_DAYS", "7"))
 CLEANUP_INTERVAL = max(60, int(os.getenv("ASTK_CLEANUP_INTERVAL", "3600")))
+TRUST_PROXY = os.getenv("ASTK_TRUST_PROXY", "0").lower() in {"1", "true", "yes"}
 JOB_QUEUE = JobQueue(lambda job_id: run_job(STORE, job_id))
 
 
@@ -97,18 +98,28 @@ class ASTKHandler(SimpleHTTPRequestHandler):
         super().__init__(*args, directory=str(ROOT), **kwargs)
 
     def log_message(self, format: str, *args) -> None:
-        print(f"[{self.log_date_time_string()}] {format % args}")
+        print(f"[{self.log_date_time_string()}] [{self.client_address_label()}] {format % args}")
 
     def send_json(self, payload: object, status: int = 200) -> None:
         data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(data)))
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("X-Frame-Options", "SAMEORIGIN")
+        self.send_header("Referrer-Policy", "strict-origin-when-cross-origin")
         self.send_header("Cache-Control", "no-store, no-cache, must-revalidate")
         self.send_header("Pragma", "no-cache")
         self.send_header("Expires", "0")
         self.end_headers()
         self.wfile.write(data)
+
+    def client_address_label(self) -> str:
+        if TRUST_PROXY:
+            forwarded = self.headers.get("X-Forwarded-For", "")
+            if forwarded:
+                return forwarded.split(",", 1)[0].strip()
+        return self.client_address[0]
 
     def do_GET(self) -> None:
         parsed = urlparse(self.path)

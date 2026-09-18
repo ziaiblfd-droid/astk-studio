@@ -100,3 +100,13 @@ docker compose up --build -d
 ```
 
 默认只启动一个 ASTK worker，后续任务进入队列。可通过 `ASTK_WORKERS` 调整并发数，但每个 ASTK 任务可能消耗较多 CPU 和内存。
+
+## 公网 Linux 部署
+
+要让其他人在本机关机后仍能访问，必须把网站和 ASTK 执行环境部署到持续运行的 Linux 服务器，并为其分配公网端口或域名。仓库提供了三种方式：
+
+1. 临时公网验证：运行 `scripts/run-public-server.sh`，服务监听 `0.0.0.0:4173`，然后由服务器管理员在安全组和防火墙中放行该端口。
+2. 生产单机服务：使用 `deploy/astk-studio.service` 注册 systemd 服务，再用 `deploy/nginx-astk.conf` 反向代理并配置 HTTPS。
+3. 容器部署：使用仓库根目录的 `Dockerfile` 和 `compose.yaml`，把 `ASTK_HOST` 设为 `0.0.0.0`，并将数据卷挂载到持久化磁盘。
+
+直接暴露 `4173` 端口只适合临时测试。正式公开前应配置域名、HTTPS、身份认证、上传限制和定期备份。Nginx 示例中的 `astk.example.com` 需要替换为实际域名。

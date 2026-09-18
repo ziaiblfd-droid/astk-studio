@@ -217,6 +217,7 @@ class PipelineTests(unittest.TestCase):
             self.assertEqual(results["metrics"]["significant_events"], 2)
             self.assertEqual(results["metrics"]["sample_count"], 4)
             self.assertEqual(results["event_counts"]["SE"], 2)
+            self.assertEqual(results["significant_event_counts"]["SE"], 2)
             self.assertEqual(results["direction_counts"], {"up": 1, "down": 1})
             self.assertEqual(results["images"]["volcano"][0]["name"], "E11_5_vs_E12_5_SE")
             self.assertEqual(results["comparisons"][0]["control"], "E11.5")

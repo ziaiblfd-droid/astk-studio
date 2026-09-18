@@ -113,6 +113,100 @@
   animation: astk-spin 0.85s linear infinite;
 }
 
+.stage-icon .lucide-loader-circle {
+  animation: astk-spin 0.85s linear infinite;
+}
+
+.run-loader-spinner {
+  animation: astk-spin 0.85s linear infinite;
+}
+
+.image-lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: grid;
+  place-items: center;
+  padding: 36px;
+  background: rgba(10, 25, 21, 0.78);
+  backdrop-filter: blur(5px);
+}
+
+.image-lightbox[hidden] {
+  display: none;
+}
+
+.lightbox-content {
+  width: min(1320px, 94vw);
+  height: min(900px, 88vh);
+  display: grid;
+  place-items: center;
+  padding: 22px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 7px;
+  background: #fff;
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.34);
+}
+
+.lightbox-content > * {
+  max-width: 100%;
+  max-height: 100%;
+}
+
+.lightbox-content .result-plot,
+.lightbox-content .supplemental-plot img {
+  width: auto;
+  height: auto;
+  object-fit: contain;
+}
+
+.lightbox-content .donut-wrap {
+  width: min(820px, 82vw);
+  height: min(620px, 72vh);
+  justify-content: center;
+}
+
+.lightbox-content .donut {
+  width: min(390px, 42vw);
+  height: min(390px, 42vw);
+}
+
+.lightbox-content .donut:after {
+  width: min(248px, 27vw);
+  height: min(248px, 27vw);
+}
+
+.lightbox-content .donut-center strong {
+  font-size: 34px;
+}
+
+.lightbox-content .bar-chart,
+.lightbox-content .scatter-chart,
+.lightbox-content .heatmap,
+.lightbox-content .volcano-chart {
+  width: 100%;
+  height: 100%;
+}
+
+.lightbox-close {
+  position: absolute;
+  top: 22px;
+  right: 24px;
+  z-index: 1;
+  width: 42px;
+  height: 42px;
+  display: grid;
+  place-items: center;
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  border-radius: 5px;
+  background: rgba(255, 255, 255, 0.12);
+  color: #fff;
+}
+
+.lightbox-close:hover {
+  background: rgba(255, 255, 255, 0.22);
+}
+
 .supplemental-heading {
   margin-top: 30px;
 }
@@ -148,6 +242,10 @@
   object-fit: contain;
 }
 
+.supplemental-card .more-button {
+  display: grid;
+}
+
 @keyframes astk-spin {
   to {
     transform: rotate(360deg);
@@ -157,5 +255,22 @@
 @media (max-width: 1000px) {
   .supplemental-grid {
     grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 760px) {
+  .image-lightbox {
+    padding: 14px;
+  }
+
+  .lightbox-content {
+    width: 96vw;
+    height: 90vh;
+    padding: 12px;
+  }
+
+  .lightbox-close {
+    top: 8px;
+    right: 10px;
   }
 }
