@@ -1,18 +1,19 @@
 # 发布与计算部署方案
 
 ASTK Studio 分为公开前端和计算后端两部分。固定前端使用 Streamlit Community
-Cloud，计算后端必须运行在持续在线的 x86_64 Linux 主机上。
+Cloud，计算后端运行在持续在线的 Linux 主机上。
 
 ## 架构约束
 
-当前 `Dockerfile` 的基础镜像是 `huangshing/astk:latest`，Docker Hub 上提供的是
-`linux/amd64`。因此 Oracle Cloud Always Free 的 `A1 ARM` 实例不能直接运行现有
-后端镜像；除非先自行构建并验证 ARM64 ASTK 镜像，否则应选择 x86_64。
+当前 `Dockerfile` 基于标准 Python 3.12，并从 PyPI 安装 `astk`。依赖中的
+`pysam` 提供 `manylinux` 的 x86_64 与 ARM64 wheel，因此后端镜像可以在两类
+架构上构建。生产部署仍建议至少 4 GB 内存；1 GB 实例需要额外 swap 并进行
+真实任务压测。
 
 | 方案 | CPU 架构 | 估算内存 | 结论 |
 | --- | --- | --- | --- |
 | Oracle `VM.Standard.E2.1.Micro` | x86_64 | 1 GB + swap | 可试，运行 ASTK 前必须压测内存 |
-| Oracle `VM.Standard.A1.Flex` | ARM64 | 最多 12 GB | 不能直接复用现有镜像 |
+| Oracle `VM.Standard.A1.Flex` | ARM64 | 最多 12 GB | 可构建，需先做一次端到端验收 |
 | 付费/试用通用 x86 VM | x86_64 | 4 GB 及以上 | 最稳妥，推荐生产使用 |
 | 现有校内 x86 服务器 | x86_64 | 已满足 | 若有公网入口和最简反向代理可优先复用 |
 
@@ -20,7 +21,7 @@ Cloud，计算后端必须运行在持续在线的 x86_64 Linux 主机上。
 
 前提：
 
-- Ubuntu 22.04/24.04 或兼容的 x86_64 Linux
+- Ubuntu 22.04/24.04 或兼容的 Linux（x86_64 或 ARM64）
 - 已安装 Docker Engine 和 Compose plugin
 - 已安装 Caddy（或改用 Nginx）
 - 一个归你控制的域名，例如 `astk-api.example.com`
@@ -38,10 +39,9 @@ bash scripts/deploy-fixed-backend.sh
 
 脚本会：
 
-1. 拒绝非 x86_64 主机，避免误在 ARM 上拉取错误镜像。
-2. 启动只绑定 `127.0.0.1:4173` 的 ASTK Docker 服务。
-3. 等待并检查 `/api/health`。
-4. 生成 `Caddyfile`，用于自动申请 TLS 和反向代理。
+1. 启动只绑定 `127.0.0.1:4173` 的 ASTK Docker 服务。
+2. 等待并检查 `/api/health`。
+3. 生成 `Caddyfile`，用于自动申请 TLS 和反向代理。
 
 脚本不会自动启动 Caddy，避免未经确认就修改系统服务。安装 Caddy 后执行：
 

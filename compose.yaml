@@ -2,10 +2,7 @@ services:
   astk-studio:
     build:
       context: .
-      platforms:
-        - linux/amd64
     image: astk-studio:latest
-    platform: linux/amd64
     restart: unless-stopped
     ports:
       - "127.0.0.1:4173:4173"

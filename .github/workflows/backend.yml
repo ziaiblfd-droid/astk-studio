@@ -1,0 +1,52 @@
+name: Validate backend image
+
+on:
+  push:
+    paths:
+      - "Dockerfile"
+      - "requirements-backend.txt"
+      - "backend/**"
+      - "scripts/run-astk-job.sh"
+      - ".github/workflows/backend.yml"
+  pull_request:
+    paths:
+      - "Dockerfile"
+      - "requirements-backend.txt"
+      - "backend/**"
+      - "scripts/run-astk-job.sh"
+      - ".github/workflows/backend.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      - name: Build backend image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile
+          load: true
+          tags: astk-studio:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Verify ASTK CLI
+        run: docker run --rm --entrypoint astk astk-studio:ci --help
+      - name: Build ARM64 backend image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile
+          platforms: linux/arm64
+          push: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Run Python tests
+        run: python3 -m unittest discover -s tests -v

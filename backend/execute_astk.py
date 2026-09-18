@@ -22,7 +22,9 @@ def execute(job_dir: Path) -> None:
     )
     log_path.write_text(process.stdout + "\n" + process.stderr, encoding="utf-8")
     if process.returncode != 0:
-        raise RuntimeError(f"ASTK exited with code {process.returncode}")
+        detail = (process.stderr or process.stdout or "").strip().splitlines()
+        suffix = f": {detail[-1]}" if detail else ""
+        raise RuntimeError(f"ASTK exited with code {process.returncode}{suffix}")
     plot_log = generate_visualizations(job_dir, plan)
     if plot_log:
         with log_path.open("a", encoding="utf-8") as handle:

@@ -6,12 +6,6 @@ DOMAIN="${ASTK_DOMAIN:-}"
 EMAIL="${ASTK_TLS_EMAIL:-}"
 ENV_FILE="$APP_DIR/.env"
 
-if [[ "$(uname -m)" != "x86_64" ]]; then
-  echo "ASTK currently requires x86_64 because huangshing/astk is amd64-only." >&2
-  echo "Use an x86_64 VM, or build and validate an ARM64 ASTK image first." >&2
-  exit 2
-fi
-
 command -v docker >/dev/null 2>&1 || {
   echo "docker is required. Install Docker Engine and the Compose plugin first." >&2
   exit 2
@@ -33,9 +27,8 @@ fi
 
 if [[ ! -f "$APP_DIR/references/mm10/gencode.vM25.annotation.gtf" ]] && \
    [[ ! -f "$APP_DIR/references/hg38/gencode.v44.annotation.gtf" ]]; then
-  echo "No supported reference annotation is available." >&2
-  echo "Place at least one of the required GTFs under references/ before starting jobs." >&2
-  exit 2
+  echo "Warning: no supported reference GTF was found under references/." >&2
+  echo "The service can start, but analysis jobs will fail until one is added." >&2
 fi
 
 if [[ ! -f "$ENV_FILE" ]]; then

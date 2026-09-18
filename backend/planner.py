@@ -26,6 +26,12 @@ DEFAULT_REFERENCES = {
     },
 }
 
+REFERENCE_FILES = {
+    "Mus musculus · mm10": ("mm10", "gencode.vM25.annotation.gtf"),
+    "Homo sapiens · hg38": ("hg38", "gencode.v44.annotation.gtf"),
+}
+REFERENCE_ROOTS = (Path("/refs"), Path(__file__).resolve().parent.parent / "references")
+
 
 class InputError(ValueError):
     pass
@@ -49,6 +55,15 @@ def load_references() -> dict[str, dict[str, str]]:
         references["Mus musculus · mm10"]["gtf"] = mm10_gtf
     if hg38_gtf := os.getenv("ASTK_HG38_GTF"):
         references["Homo sapiens · hg38"]["gtf"] = hg38_gtf
+    for species, (species_dir, filename) in REFERENCE_FILES.items():
+        configured = references.get(species, {}).get("gtf", "")
+        if configured and Path(configured).exists():
+            continue
+        for root in REFERENCE_ROOTS:
+            candidate = root / species_dir / filename
+            if candidate.exists():
+                references.setdefault(species, {})["gtf"] = str(candidate)
+                break
     return references
 
 
@@ -384,8 +399,9 @@ def prepare_job(job_dir: Path, require_reference: bool = False) -> dict[str, Any
     if require_reference and not gtf.exists():
         raise InputError(f"Reference GTF does not exist: {gtf}")
     output_dir = job_dir / "output" / "analysis"
+    astk_command = os.getenv("ASTK_COMMAND", "astk")
     command = [
-        "astk", "dsflow",
+        astk_command, "dsflow",
         "-od", relative_job_path(job_dir, output_dir),
         "-md", relative_job_path(job_dir, metadata_json),
         "-gtf", reference["gtf"],

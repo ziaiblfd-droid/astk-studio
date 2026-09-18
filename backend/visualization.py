@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import json
+import os
 import subprocess
 from pathlib import Path
 from typing import Any
@@ -14,6 +15,9 @@ HEATMAP_TOP_EVENTS = 60
 
 
 def run_plot(command: list[str], log: list[str]) -> None:
+    astk_command = os.getenv("ASTK_COMMAND", "astk")
+    if command and command[0] == "astk":
+        command = [astk_command, *command[1:]]
     process = subprocess.run(command, capture_output=True, text=True, check=False)
     log.append(f"$ {' '.join(command)}")
     if process.stdout.strip():

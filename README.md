@@ -113,8 +113,9 @@ docker compose up --build -d
 
 ### 固定后端最短路径
 
-当前 ASTK 基础镜像只有 `linux/amd64`，不要在 ARM 实例上直接部署。准备一台
-x86_64 Linux VM、一个可配置 DNS 的域名和 TLS 邮箱后：
+新的后端镜像基于标准 Python 3.12，并直接安装 PyPI 的 `astk`，可在
+`linux/amd64` 和 `linux/arm64` 上构建。准备一台持续在线的 Linux VM、
+一个可配置 DNS 的域名和 TLS 邮箱后：
 
 ```bash
 export ASTK_DOMAIN=astk-api.example.com
