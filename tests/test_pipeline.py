@@ -8,9 +8,10 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from backend.cleanup import cleanup_expired_jobs
-from backend.planner import InputError, prepare_job, safe_extract_zip
+from backend.planner import InputError, native_comparison_label, prepare_job, safe_extract_zip
 from backend.result_parser import parse_results
 from backend.server import validate_analysis_files
+from backend.visualization import filter_significant_dpsi, load_comparisons, prepare_heatmap_inputs
 
 
 QUANT = "Name\tLength\tEffectiveLength\tTPM\tNumReads\nTX1\t1000\t800\t12.5\t10\n"
@@ -89,6 +90,102 @@ class PipelineTests(unittest.TestCase):
             self.assertEqual(metadata["facial_11.5_12"]["case"]["samples"][0]["name"], "e12_r1")
             self.assertTrue(metadata["facial_11.5_12"]["case"]["samples"][0]["path"].endswith("quant/e12_r1/quant.sf"))
             self.assertEqual(metadata_csv.splitlines()[0], "group,condition,name,path,replicate")
+
+    def test_native_comparison_labels_use_sample_periods(self) -> None:
+        control, treatment, label = native_comparison_label(
+            "facial_11.5_12",
+            {
+                "ctrl": [{"name": "facial.11.5.Rep1"}, {"name": "facial.11.5.Rep2"}],
+                "case": [{"name": "facial.12.5.Rep1"}, {"name": "facial.12.5.Rep2"}],
+            },
+        )
+        self.assertEqual(control, "11.5")
+        self.assertEqual(treatment, "12.5")
+        self.assertEqual(label, "11.5 → 12.5")
+
+    def test_significant_dpsi_filter_uses_astk_strict_thresholds(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = root / "events.dpsi"
+            output = root / "filtered" / "events.sig.dpsi"
+            source.write_text(
+                "event_id\tdPSI\tp-value\n"
+                "keep-up\t0.11\t0.24\n"
+                "keep-down\t-0.11\t0.24\n"
+                "p-boundary\t0.50\t0.25\n"
+                "dpsi-boundary\t0.10\t0.01\n",
+                encoding="utf-8",
+            )
+            count = filter_significant_dpsi(source, output, p_value=0.25, abs_dpsi=0.1)
+            self.assertEqual(count, 2)
+            self.assertEqual(output.read_text(encoding="utf-8").splitlines()[-1], "keep-down\t-0.11\t0.24")
+
+    def test_heatmap_inputs_select_top_shared_events(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            analysis = root / "analysis"
+            (analysis / "psi").mkdir(parents=True)
+            (analysis / "dpsi").mkdir(parents=True)
+            for index, group in enumerate(("g1", "g2"), 1):
+                (analysis / "psi" / f"{group}_SE_c1.psi").write_text(
+                    "event_id\ts1\ts2\n"
+                    "e1\t0.1\t0.2\n"
+                    "e2\t0.2\t0.3\n"
+                    "e3\t0.3\t0.4\n",
+                    encoding="utf-8",
+                )
+                (analysis / "psi" / f"{group}_SE_c2.psi").write_text(
+                    "event_id\ts3\ts4\n"
+                    "e1\t0.1\t0.2\n"
+                    "e2\t0.2\t0.3\n"
+                    "e3\t0.3\t0.4\n",
+                    encoding="utf-8",
+                )
+                (analysis / "dpsi" / f"{group}_SE.dpsi").write_text(
+                    "event_id\tdPSI\tp-value\n"
+                    f"e1\t{0.1 * index}\t0.01\n"
+                    f"e2\t{0.5 * index}\t0.01\n"
+                    f"e3\t{0.2 * index}\t0.01\n",
+                    encoding="utf-8",
+                )
+            comparisons = [{"group": "g1"}, {"group": "g2"}]
+            outputs = prepare_heatmap_inputs(analysis, comparisons, "SE")
+            self.assertEqual(len(outputs), 3)
+            selected = outputs[0].read_text(encoding="utf-8").splitlines()[1:]
+            self.assertEqual([row.split("\t", 1)[0] for row in selected], ["e2", "e3", "e1"])
+
+    def test_visualization_recovers_period_labels_from_metadata(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            job_dir = Path(temporary) / "ASTK-TEST"
+            metadata = job_dir / "metadata"
+            metadata.mkdir(parents=True)
+            (metadata / "astk_metadata.json").write_text(
+                json.dumps(
+                    {
+                        "facial_11.5_12": {
+                            "ctrl": {"samples": [{"name": "facial.11.5.Rep1"}]},
+                            "case": {"samples": [{"name": "facial.12.5.Rep1"}]},
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+            plan = {
+                "comparisons": [
+                    {
+                        "group": "facial_11.5_12",
+                        "control": "ctrl",
+                        "treatment": "case",
+                        "label": "facial_11.5_12",
+                    }
+                ]
+            }
+
+            comparisons = load_comparisons(job_dir, plan)
+
+            self.assertEqual(comparisons[0]["control"], "11.5")
+            self.assertEqual(comparisons[0]["treatment"], "12.5")
+            self.assertEqual(comparisons[0]["label"], "11.5 → 12.5")
 
     def test_result_parser_summarizes_astk_outputs(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

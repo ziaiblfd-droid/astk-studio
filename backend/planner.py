@@ -266,9 +266,41 @@ def write_metadata(job_dir: Path, samples: list[dict[str, Any]], comparisons: li
     return json_path, csv_path
 
 
-def native_comparison_label(group: str) -> tuple[str, str, str]:
+def sample_stage_label(name: str) -> str:
+    value = re.sub(r"(?i)(?:[._-]?(?:rep|replicate)[._-]?\d+)$", "", name.strip())
+    value = re.sub(r"(?i)^(?:facial|face|stage|timepoint|sample)[._-]*", "", value)
+    match = re.search(r"(\d+(?:[._]\d+)?)", value)
+    if match:
+        return match.group(1).replace("_", ".")
+    return value or name.strip()
+
+
+def infer_sample_group_label(samples: Any) -> str:
+    if isinstance(samples, dict):
+        samples = samples.get("samples", [])
+    if not isinstance(samples, list):
+        return ""
+    labels = list(
+        dict.fromkeys(
+            sample_stage_label(sample.get("name", "") if isinstance(sample, dict) else str(sample))
+            for sample in samples
+        )
+    )
+    labels = [label for label in labels if label]
+    return " / ".join(labels)
+
+
+def native_comparison_label(
+    group: str,
+    roles: dict[str, list[dict[str, Any]]] | None = None,
+) -> tuple[str, str, str]:
     if "_vs_" in group:
         control, treatment = group.split("_vs_", 1)
+        if control and treatment:
+            return control, treatment, f"{control} → {treatment}"
+    if roles:
+        control = infer_sample_group_label(roles.get("ctrl", []))
+        treatment = infer_sample_group_label(roles.get("case", []))
         if control and treatment:
             return control, treatment, f"{control} → {treatment}"
     return "ctrl", "case", group
@@ -284,7 +316,7 @@ def write_astk_metadata(
     comparisons: list[dict[str, str]] = []
     for group, roles in groups.items():
         payload[group] = {"ctrl": {"samples": []}, "case": {"samples": []}}
-        control, treatment, label = native_comparison_label(group)
+        control, treatment, label = native_comparison_label(group, roles)
         comparisons.append({"group": group, "control": control, "treatment": treatment, "label": label})
         for condition in ("ctrl", "case"):
             for sample in roles[condition]:
@@ -368,6 +400,8 @@ def prepare_job(job_dir: Path, require_reference: bool = False) -> dict[str, Any
         "reference": reference,
         "input_format": "astk" if native_astk_input else "studio",
         "sample_count": sample_count,
+        "p_value": float(config.get("p_value", 0.05)),
+        "abs_dpsi": float(config.get("abs_dpsi", 0.1)),
         "comparisons": plan_comparisons,
         "metadata_json": relative_job_path(job_dir, metadata_json),
         "metadata_csv": relative_job_path(job_dir, metadata_csv),

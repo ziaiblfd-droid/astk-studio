@@ -9,9 +9,10 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@500;600;700;800&display=swap" rel="stylesheet" />
     <script src="https://unpkg.com/lucide@latest"></script>
-    <link rel="stylesheet" href="styles.css" />
-    <link rel="stylesheet" href="responsive.css" />
-    <link rel="stylesheet" href="github-pages.css" />
+    <link rel="stylesheet" href="styles.css?v=20260918" />
+    <link rel="stylesheet" href="responsive.css?v=20260918" />
+    <link rel="stylesheet" href="github-pages.css?v=20260918" />
+    <script src="app.js?v=20260918" defer></script>
   </head>
   <body>
     <div class="app-shell">
@@ -83,6 +84,7 @@
               <div class="panel-heading"><div><div class="panel-kicker">02 / STATUS</div><h2>运行状态</h2></div><span class="status-tag"><span></span> COMPLETED</span></div>
               <div class="run-id"><span>RUN ID</span><strong>ASTK-260917-001</strong><button class="copy-button" title="复制任务 ID"><i data-lucide="copy"></i></button></div>
               <div class="progress-block"><div class="progress-label"><span>分析进度</span><strong id="progress-value">100%</strong></div><div class="progress-track"><div class="progress-fill" id="progress-fill"></div></div><div class="progress-meta"><span id="progress-text">7 / 7 stages complete</span><span id="run-duration">演示任务</span></div></div>
+              <div class="run-loader" id="run-loader" role="status" aria-live="polite"><span class="run-loader-spinner" aria-hidden="true"></span><div><strong id="run-loader-title">ASTK 正在分析</strong><span id="run-loader-text">任务已排队</span></div></div>
               <div class="stage-list" id="stage-list"><div class="stage done"><span class="stage-icon"><i data-lucide="check"></i></span><div><strong>Input validation</strong><span>6 files · metadata matched</span></div><time>00:14</time></div><div class="stage done"><span class="stage-icon"><i data-lucide="check"></i></span><div><strong>Event generation</strong><span>ALL · 7 event classes</span></div><time>02:08</time></div><div class="stage done"><span class="stage-icon"><i data-lucide="check"></i></span><div><strong>PSI & differential splicing</strong><span>1,824 significant events</span></div><time>05:51</time></div><div class="stage done"><span class="stage-icon"><i data-lucide="check"></i></span><div><strong>Report generation</strong><span>12 figures · 4 tables</span></div><time>00:29</time></div></div>
               <button class="report-link" id="download-report"><i data-lucide="file-down"></i>下载完整分析报告 <span>ZIP</span></button>
             </section>
@@ -93,8 +95,10 @@
 
           <div class="charts-grid"><section class="panel chart-panel large"><div class="chart-header"><div><h3>事件类型分布</h3><span>Significant events by developmental stage</span></div><div class="legend"><span><i class="legend-dot green"></i>Included</span><span><i class="legend-dot ink"></i>Excluded</span></div></div><div class="bar-chart" id="bar-chart"></div><div class="chart-axis"><span>E11.5</span><span>E12.5</span><span>E13.5</span><span>E14.5</span><span>E15.5</span><span>E16.5</span><span>P0</span></div></section><section class="panel chart-panel"><div class="chart-header"><div><h3>七类事件</h3><span>Event composition</span></div><button class="more-button" title="查看详情"><i data-lucide="arrow-up-right"></i></button></div><div class="donut-wrap"><div class="donut"><div class="donut-center"><strong>42.8k</strong><span>events</span></div></div><div class="donut-legend" id="donut-legend"></div></div></section></div>
 
-          <div class="charts-grid lower"><section class="panel chart-panel"><div class="chart-header"><div><h3>PSI 样本结构</h3><span>Principal component analysis</span></div><button class="more-button"><i data-lucide="maximize-2"></i></button></div><div class="scatter-chart" id="pca-chart"></div><div class="scatter-legend"><span><i class="legend-dot blue"></i>Early</span><span><i class="legend-dot yellow"></i>Mid</span><span><i class="legend-dot coral"></i>Late</span></div></section><section class="panel chart-panel wide"><div class="chart-header"><div><h3>显著事件热图</h3><span>Top 40 events · normalized PSI</span></div><div class="chart-actions"><select><option>All types</option><option>SE</option><option>AF</option><option>RI</option></select><button class="more-button"><i data-lucide="maximize-2"></i></button></div></div><div class="heatmap" id="heatmap"></div><div class="heatmap-labels"><span>Low PSI</span><span>High PSI</span></div></section></div>
+          <div class="charts-grid lower"><section class="panel chart-panel"><div class="chart-header"><div><h3>PSI 样本结构</h3><span>Principal component analysis</span></div><button class="more-button"><i data-lucide="maximize-2"></i></button></div><div class="scatter-chart" id="pca-chart"></div><div class="scatter-legend"><span><i class="legend-dot blue"></i>Early</span><span><i class="legend-dot yellow"></i>Mid</span><span><i class="legend-dot coral"></i>Late</span></div></section><section class="panel chart-panel wide"><div class="chart-header"><div><h3>显著事件热图</h3><span>Top 60 events · normalized PSI</span></div><div class="chart-actions"><select id="heatmap-type" aria-label="热图事件类型"><option value="SE">SE</option><option value="AF">AF</option><option value="A3">A3</option><option value="A5">A5</option><option value="AL">AL</option><option value="MX">MX</option><option value="RI">RI</option></select><button class="more-button"><i data-lucide="maximize-2"></i></button></div></div><div class="heatmap" id="heatmap"></div><div class="heatmap-labels"><span>Low PSI</span><span>High PSI</span></div></section></div>
           <section class="panel volcano-panel"><div class="chart-header"><div><h3>差异可变剪切</h3><span>ΔPSI vs statistical significance</span></div><div class="volcano-summary"><span><i class="legend-dot coral"></i>Up 903</span><span><i class="legend-dot blue"></i>Down 921</span><button class="button mini secondary">查看全部事件</button></div></div><div class="volcano-chart" id="volcano-chart"></div></section>
+          <div class="section-heading supplemental-heading" id="supplemental-heading" hidden><div><div class="eyebrow">04 / SUPPLEMENTARY</div><h2>比较组补充图表</h2></div></div>
+          <div class="supplemental-grid" id="supplemental-charts" hidden></div>
         </section>
 
         <section class="page-view" id="events-view"><div class="page-heading compact"><div><div class="eyebrow">EVENT EXPLORER</div><h1>事件浏览器</h1><p>在所有可变剪切事件中定位值得关注的基因与调控模式。</p></div><button class="button primary" id="export-events"><i data-lucide="download"></i>导出当前结果</button></div><section class="panel event-browser"><div class="event-toolbar"><div class="event-tabs" id="event-tabs"></div><div class="table-tools"><div class="search-field"><i data-lucide="search"></i><input id="event-search" placeholder="搜索 gene / event ID" /></div><select id="event-filter"><option value="all">全部显著性</option><option value="up">dPSI 上升</option><option value="down">dPSI 下降</option></select></div></div><div class="table-wrap"><table><thead><tr><th>Event ID</th><th>Gene</th><th>Type</th><th>Condition</th><th>PSI</th><th>ΔPSI</th><th>p-value</th><th></th></tr></thead><tbody id="events-table"></tbody></table></div><div class="table-footer"><span id="event-count">Showing 8 of 1,824 significant events</span><div class="pagination"><button class="page-button active">1</button><button class="page-button">2</button><button class="page-button">3</button><span>...</span><button class="page-button">Next <i data-lucide="chevron-right"></i></button></div></div></section></section>
@@ -105,6 +109,5 @@
       </main>
     </div>
     <div class="toast" id="toast" role="status"><i data-lucide="check-circle-2"></i><span>分析任务已提交</span></div>
-    <script src="app.js"></script>
   </body>
 </html>
