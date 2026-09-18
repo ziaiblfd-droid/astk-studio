@@ -1,4 +1,4 @@
-FROM huangshing/astk
+FROM --platform=linux/amd64 huangshing/astk
 
 USER root
 WORKDIR /opt/astk-studio

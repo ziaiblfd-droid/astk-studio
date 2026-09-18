@@ -16,13 +16,18 @@
 - [ ] Test desktop and mobile layouts in the deployed Pages site.
 - [ ] Confirm that Pages clearly identifies itself as a no-upload demo.
 - [ ] Validate Docker build and real ASTK execution on a Linux host.
+- [ ] Confirm the backend host is `x86_64`; the current ASTK base image is AMD64 only.
 - [ ] Test all seven event types with a small shareable dataset.
+- [ ] Run `scripts/verify-fixed-backend.sh` against the final HTTPS domain.
 - [ ] Confirm result ZIP contents and failure messages.
+- [ ] Update Streamlit `ASTK_BACKEND_URL` to the fixed HTTPS backend.
+- [ ] Confirm no temporary tunnel URL is present in tracked deployment files.
 
 ## Operations and security
 
 - [ ] Mount references read-only and persist the job data volume.
 - [ ] Put the service behind HTTPS and an authenticated reverse proxy if public.
+- [ ] Keep the ASTK container bound to `127.0.0.1` and expose only `80/443`.
 - [ ] Set upload, worker, CPU, memory, and timeout limits.
 - [ ] Confirm the retention period and automatic cleanup behavior.
 - [ ] Document backup, monitoring, and incident response ownership.

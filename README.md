@@ -111,6 +111,28 @@ docker compose up --build -d
 
 直接暴露 `4173` 端口只适合临时测试。正式公开前应配置域名、HTTPS、身份认证、上传限制和定期备份。Nginx 示例中的 `astk.example.com` 需要替换为实际域名。
 
+### 固定后端最短路径
+
+当前 ASTK 基础镜像只有 `linux/amd64`，不要在 ARM 实例上直接部署。准备一台
+x86_64 Linux VM、一个可配置 DNS 的域名和 TLS 邮箱后：
+
+```bash
+export ASTK_DOMAIN=astk-api.example.com
+export ASTK_TLS_EMAIL=you@example.com
+bash scripts/deploy-fixed-backend.sh
+```
+
+脚本会启动仅绑定 `127.0.0.1:4173` 的 Docker 服务、执行本机健康检查并生成
+`Caddyfile`。按脚本提示启动 Caddy 后，从外部网络验收：
+
+```bash
+ASTK_BACKEND_URL=https://astk-api.example.com bash scripts/verify-fixed-backend.sh
+```
+
+验收通过后，在 Streamlit Community Cloud 的 Secrets 中将
+`ASTK_BACKEND_URL` 更新为该固定 HTTPS 地址。不要把 TryCloudflare 或
+Localtunnel 临时地址用于正式配置。
+
 ## Streamlit Cloud 固定前端
 
 仓库还提供了一个 Streamlit 入口 `streamlit_app.py`。它可以把界面部署到固定的
