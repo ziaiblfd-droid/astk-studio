@@ -2,8 +2,7 @@ FROM python:3.12-slim-bookworm AS builder
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    PIP_NO_CACHE_DIR=1 \
-    PIP_ONLY_BINARY=:all:
+    PIP_NO_CACHE_DIR=1
 
 WORKDIR /build
 
@@ -12,12 +11,14 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements-backend.txt /opt/astk-studio/requirements-backend.txt
-RUN python3 -m pip install --prefix=/install --upgrade pip \
-    && python3 -m pip install --prefix=/install -r /opt/astk-studio/requirements-backend.txt
+RUN python3 -m venv /opt/venv \
+    && /opt/venv/bin/python -m pip install --upgrade pip \
+    && /opt/venv/bin/python -m pip install --only-binary=:all: \
+        -r /opt/astk-studio/requirements-backend.txt
 
 FROM python:3.12-slim-bookworm
 
-ENV PATH="/usr/local/bin:$PATH"
+ENV PATH="/opt/venv/bin:$PATH"
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -36,8 +37,7 @@ RUN apt-get update \
         procps \
     && rm -rf /var/lib/apt/lists/*
 
-COPY --from=builder /install/bin /usr/local/bin
-COPY --from=builder /install/lib /usr/local/lib
+COPY --from=builder /opt/venv /opt/venv
 
 WORKDIR /opt/astk-studio
 
