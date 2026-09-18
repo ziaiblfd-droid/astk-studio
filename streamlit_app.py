@@ -22,14 +22,9 @@ TERMINAL_STATUSES = {"completed", "failed"}
 SPECIES = (
     "Mus musculus · mm10",
     "Homo sapiens · hg38",
-    "Drosophila melanogaster · dm6",
-    "Caenorhabditis elegans · ce11",
-    "Arabidopsis thaliana · TAIR10",
 )
 DATA_SOURCES = (
     "Salmon quant.sf · transcript TPM",
-    "SUPPA2 PSI / dPSI",
-    "rMATS results",
 )
 DESIGNS = ("多时间点发育序列", "两组比较", "多组比较")
 EVENT_LABELS = {
@@ -254,7 +249,7 @@ def render_event_table(results: dict[str, Any]) -> None:
 def render_images(results: dict[str, Any], job_id: str) -> None:
     images = results.get("images") or {}
     if not images:
-        st.info("本次分析结果中没有图片文件。完成真实 ASTK 任务后会在此展示 PCA、热图、火山图、柱状图和 UpSet 图。")
+        st.info("本次分析结果中没有图片文件。完成真实 SUPPA2 任务后会在此展示 PCA、热图、火山图、柱状图和 UpSet 图。")
         return
     category_labels = {
         "bar": "Event counts",
@@ -278,7 +273,7 @@ def render_images(results: dict[str, Any], job_id: str) -> None:
 
 
 def render_download(results: dict[str, Any], job_id: str) -> None:
-    st.write("下载完整分析结果，包括任务配置、ASTK 元数据、结果 JSON、图表和运行日志。")
+    st.write("下载完整分析结果，包括任务配置、SUPPA2 元数据、结果 JSON、图表和运行日志。")
     archive = fetch_bytes(api_url(f"/api/jobs/{job_id}/download"))
     if archive:
         st.download_button(
@@ -356,7 +351,7 @@ st.markdown(
     <div class="astk-hero">
       <div class="astk-kicker">ASTK Studio · Streamlit front end</div>
       <h1>可变剪切分析工作台</h1>
-      <p>上传转录本定量 ZIP 和样本表，提交到 Linux ASTK 服务，查看七类事件和下游图表。</p>
+      <p>上传转录本定量 ZIP 和样本表，提交到 Linux SUPPA2 服务，查看七类事件和下游图表。</p>
     </div>
     """,
     unsafe_allow_html=True,
@@ -387,11 +382,11 @@ with st.sidebar:
         st.session_state.pop("astk_results", None)
         st.rerun()
     st.divider()
-    st.caption("计算任务通常需要较长时间。Streamlit 只负责界面，ASTK 在 Linux 后端继续运行。")
+    st.caption("计算任务通常需要较长时间。Streamlit 只负责界面，SUPPA2 在 Linux 后端继续运行。")
 
 current_health = health()
 if current_health is None:
-    st.warning("当前未连接 ASTK 后端。可以先查看页面结构，配置后端地址后再提交真实任务。")
+    st.warning("当前未连接 SUPPA2 后端。可以先查看页面结构，配置后端地址后再提交真实任务。")
 
 upload_col, config_col = st.columns([1.15, 0.85], gap="large")
 with upload_col:
@@ -404,7 +399,7 @@ with upload_col:
             accept_multiple_files=True,
             help="ZIP 中包含每个样本的 quant.sf；CSV 中使用现有 samples.csv 列格式。",
         )
-        submit = st.form_submit_button("运行 ASTK 分析", type="primary", width="stretch")
+        submit = st.form_submit_button("运行 SUPPA2 分析", type="primary", width="stretch")
     if submit:
         files = uploaded_files or []
         zips = [item for item in files if item.name.lower().endswith(".zip")]
@@ -422,11 +417,11 @@ with upload_col:
                 "event_type": "ALL",
                 "method": "empirical",
                 "p_value": float(st.session_state.get("p_value", 0.05)),
-                "abs_dpsi": 0.1,
+                "abs_dpsi": float(st.session_state.get("abs_dpsi", 0.1)),
                 "demo": False,
                 "files": [item.name for item in files],
             }
-            with st.spinner("正在提交任务并准备 ASTK 输入..."):
+            with st.spinner("正在提交任务并准备 SUPPA2 输入..."):
                 try:
                     job = create_job(config, files)
                     st.session_state["astk_job_id"] = job["id"]
@@ -442,7 +437,8 @@ with config_col:
     st.selectbox("物种和参考注释", SPECIES, key="species")
     st.selectbox("实验设计", DESIGNS, key="design")
     st.number_input("显著性阈值 p-value", min_value=0.0001, max_value=1.0, value=0.05, step=0.01, format="%.4f", key="p_value")
-    st.caption("默认使用 |dPSI| >= 0.1，比较模式为 baseline。")
+    st.number_input("最小变化幅度 |dPSI|", min_value=0.0, max_value=1.0, value=0.1, step=0.01, format="%.2f", key="abs_dpsi")
+    st.caption("比较模式为 baseline；事件表仅保留同时满足 p-value 和 |dPSI| 阈值的记录。")
 
 st.divider()
 job_id = st.session_state.get("astk_job_id")

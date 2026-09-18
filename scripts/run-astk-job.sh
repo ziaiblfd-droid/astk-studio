@@ -7,7 +7,7 @@ if [[ $# -ne 1 ]]; then
 fi
 
 JOB_DIR="$(cd "$1" && pwd)"
-APP_DIR="${ASTK_STUDIO_DIR:-$HOME/astk-studio}"
+APP_DIR="${ASTK_STUDIO_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 
 cd "$APP_DIR"
-python3 -m backend.execute_astk "$JOB_DIR"
+python3 -m backend.execute_suppa "$JOB_DIR"

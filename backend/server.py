@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import io
 import json
 import mimetypes
 import os
 import re
 import secrets
+import shutil
 import sys
+import tempfile
 import threading
 import time
 from datetime import datetime
@@ -17,12 +20,14 @@ from urllib.parse import unquote, urlparse
 if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
     from backend.cleanup import cleanup_expired_jobs
-    from backend.job_queue import JobQueue
+    from backend.job_queue import JobQueue, recover_pending_jobs
+    from backend.multipart import MultipartError, parse_multipart_stream
     from backend.runner import run_job
     from backend.store import JobStore
 else:
     from .cleanup import cleanup_expired_jobs
-    from .job_queue import JobQueue
+    from .job_queue import JobQueue, recover_pending_jobs
+    from .multipart import MultipartError, parse_multipart_stream
     from .runner import run_job
     from .store import JobStore
 
@@ -58,32 +63,22 @@ def safe_filename(value: str) -> str:
 
 
 def parse_multipart(body: bytes, content_type: str) -> tuple[dict[str, str], list[tuple[str, bytes]]]:
-    match = re.search(r"boundary=(?:\"([^\"]+)\"|([^;]+))", content_type)
-    if not match:
-        raise ValueError("Missing multipart boundary")
-    boundary = (match.group(1) or match.group(2)).encode("ascii")
-    fields: dict[str, str] = {}
-    files: list[tuple[str, bytes]] = []
-    for part in body.split(b"--" + boundary):
-        part = part.strip(b"\r\n")
-        if not part or part == b"--" or b"\r\n\r\n" not in part:
-            continue
-        header_bytes, payload = part.split(b"\r\n\r\n", 1)
-        if payload.endswith(b"\r\n"):
-            payload = payload[:-2]
-        headers = header_bytes.decode("utf-8", errors="replace")
-        name_match = re.search(r'name="([^"]+)"', headers)
-        filename_match = re.search(r'filename="([^"]*)"', headers)
-        if not name_match:
-            continue
-        if filename_match and filename_match.group(1):
-            files.append((safe_filename(filename_match.group(1)), payload))
-        else:
-            fields[name_match.group(1)] = payload.decode("utf-8", errors="replace")
+    with tempfile.TemporaryDirectory() as temporary:
+        fields, stored_files = parse_multipart_stream(
+            io.BytesIO(body),
+            len(body),
+            content_type,
+            Path(temporary),
+            MAX_UPLOAD_BYTES,
+        )
+        files = [
+            (safe_filename(filename), path.read_bytes())
+            for filename, path in stored_files
+        ]
     return fields, files
 
 
-def validate_analysis_files(files: list[tuple[str, bytes]]) -> None:
+def validate_analysis_files(files: list[tuple[str, object]]) -> None:
     names = [name.lower() for name, _ in files]
     archives = [name for name in names if name.endswith(".zip")]
     sample_sheets = [name for name in names if name.endswith(".csv")]
@@ -161,51 +156,73 @@ class ASTKHandler(SimpleHTTPRequestHandler):
         if self.path != "/api/jobs":
             self.send_json({"error": "Not found"}, 404)
             return
-        length = int(self.headers.get("Content-Length", "0"))
+        try:
+            length = int(self.headers.get("Content-Length", "0"))
+        except ValueError:
+            self.send_json({"error": "Invalid Content-Length"}, 400)
+            return
         if length <= 0 or length > MAX_UPLOAD_BYTES:
             self.send_json({"error": "Invalid or oversized request"}, HTTPStatus.REQUEST_ENTITY_TOO_LARGE)
             return
-        body = self.rfile.read(length)
         content_type = self.headers.get("Content-Type", "")
+        incoming_dir: Path | None = None
+        job_id: str | None = None
         try:
             if content_type.startswith("multipart/form-data"):
-                fields, files = parse_multipart(body, content_type)
+                incoming_dir = Path(tempfile.mkdtemp(prefix=".upload-", dir=STORE.root))
+                fields, stored_files = parse_multipart_stream(
+                    self.rfile,
+                    length,
+                    content_type,
+                    incoming_dir,
+                    MAX_UPLOAD_BYTES,
+                )
                 config = json.loads(fields.get("config", "{}"))
+                files = [(safe_filename(name), path) for name, path in stored_files]
             else:
+                body = self.rfile.read(length)
                 config = json.loads(body.decode("utf-8"))
                 files = []
-        except (ValueError, json.JSONDecodeError) as exc:
-            self.send_json({"error": f"Invalid request: {exc}"}, 400)
-            return
-        if os.getenv("ASTK_EXECUTION_MODE", "demo").lower() == "command":
-            try:
+            if not isinstance(config, dict):
+                raise ValueError("config must be a JSON object")
+            if os.getenv("ASTK_EXECUTION_MODE", "demo").lower() == "command":
                 validate_analysis_files(files)
-            except ValueError as exc:
-                self.send_json({"error": str(exc)}, 400)
-                return
-        job_id = make_job_id()
-        config["files"] = [name for name, _ in files] or config.get("files", [])
-        if not files:
-            config["demo"] = True
-        job = STORE.create(job_id, config)
-        input_dir = STORE.job_dir(job_id) / "input"
-        for filename, payload in files:
-            (input_dir / filename).write_bytes(payload)
-        JOB_QUEUE.submit(job_id)
-        self.send_json(job, HTTPStatus.ACCEPTED)
+            job_id = make_job_id()
+            config["files"] = [name for name, _ in files] or config.get("files", [])
+            if not files:
+                config["demo"] = True
+            job = STORE.create(job_id, config)
+            input_dir = STORE.job_dir(job_id) / "input"
+            for filename, source in files:
+                if not isinstance(source, Path):
+                    raise ValueError("Unexpected upload payload")
+                target = input_dir / filename
+                if target.exists():
+                    raise ValueError(f"Duplicate uploaded filename: {filename}")
+                shutil.move(str(source), str(target))
+            JOB_QUEUE.submit(job_id)
+            self.send_json(job, HTTPStatus.ACCEPTED)
+        except (MultipartError, UnicodeDecodeError, ValueError, json.JSONDecodeError, OSError) as exc:
+            if job_id:
+                shutil.rmtree(STORE.job_dir(job_id), ignore_errors=True)
+            self.send_json({"error": f"Invalid request: {exc}"}, 400)
+        finally:
+            if incoming_dir and incoming_dir.exists():
+                shutil.rmtree(incoming_dir, ignore_errors=True)
 
     def send_download(self, path: Path, filename: str | None = None) -> None:
         if not path.exists():
             self.send_json({"error": "Report is not ready"}, 404)
             return
-        data = path.read_bytes()
         content_type = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
         self.send_response(200)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Disposition", f'attachment; filename="{filename or path.name}"')
-        self.send_header("Content-Length", str(len(data)))
+        self.send_header("Content-Length", str(path.stat().st_size))
         self.end_headers()
-        self.wfile.write(data)
+        with path.open("rb") as handle:
+            while chunk := handle.read(1024 * 1024):
+                self.wfile.write(chunk)
 
     def send_file(self, path: Path) -> None:
         data = path.read_bytes()
@@ -221,6 +238,10 @@ class ASTKHandler(SimpleHTTPRequestHandler):
 def main() -> None:
     host = os.getenv("ASTK_HOST", "127.0.0.1")
     port = int(os.getenv("ASTK_PORT", "4173"))
+    if os.getenv("ASTK_RECOVER_JOBS", "1").lower() in {"1", "true", "yes"}:
+        recovered = recover_pending_jobs(STORE, JOB_QUEUE)
+        if recovered:
+            print(f"Recovered {len(recovered)} pending job(s): {', '.join(recovered)}")
     server = ThreadingHTTPServer((host, port), ASTKHandler)
     cleanup_thread = threading.Thread(target=cleanup_loop, name="astk-cleanup", daemon=True)
     cleanup_thread.start()

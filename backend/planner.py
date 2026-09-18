@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import hashlib
 import json
 import os
 import re
@@ -31,6 +32,7 @@ REFERENCE_FILES = {
     "Homo sapiens · hg38": ("hg38", "gencode.v44.annotation.gtf"),
 }
 REFERENCE_ROOTS = (Path("/refs"), Path(__file__).resolve().parent.parent / "references")
+SUPPA_ROOT = Path(__file__).resolve().parent.parent / "vendor" / "suppa2"
 
 
 class InputError(ValueError):
@@ -40,6 +42,18 @@ class InputError(ValueError):
 def slug(value: str) -> str:
     normalized = re.sub(r"[^A-Za-z0-9]+", "_", value.strip()).strip("_")
     return normalized or "group"
+
+
+def filename_token(value: str) -> str:
+    """Return a stable, filesystem-safe comparison identifier."""
+    original = value.strip()
+    normalized = re.sub(r"[^A-Za-z0-9._-]+", "_", original).strip("._")
+    if not normalized:
+        normalized = "group"
+    if normalized != original:
+        digest = hashlib.sha1(original.encode("utf-8")).hexdigest()[:8]
+        normalized = f"{normalized}_{digest}"
+    return normalized
 
 
 def load_references() -> dict[str, dict[str, str]]:
@@ -329,9 +343,15 @@ def write_astk_metadata(
     payload: dict[str, Any] = {}
     csv_rows: list[dict[str, Any]] = []
     comparisons: list[dict[str, str]] = []
-    for group, roles in groups.items():
+    used_group_ids: set[str] = set()
+    for raw_group, roles in groups.items():
+        group = filename_token(raw_group)
+        if group in used_group_ids:
+            suffix = hashlib.sha1(raw_group.encode("utf-8")).hexdigest()[:8]
+            group = f"{group}_{suffix}"
+        used_group_ids.add(group)
         payload[group] = {"ctrl": {"samples": []}, "case": {"samples": []}}
-        control, treatment, label = native_comparison_label(group, roles)
+        control, treatment, label = native_comparison_label(raw_group, roles)
         comparisons.append({"group": group, "control": control, "treatment": treatment, "label": label})
         for condition in ("ctrl", "case"):
             for sample in roles[condition]:
@@ -399,25 +419,26 @@ def prepare_job(job_dir: Path, require_reference: bool = False) -> dict[str, Any
     if require_reference and not gtf.exists():
         raise InputError(f"Reference GTF does not exist: {gtf}")
     output_dir = job_dir / "output" / "analysis"
-    astk_command = os.getenv("ASTK_COMMAND", "astk")
+    suppa_command = os.getenv("SUPPA_COMMAND", str(SUPPA_ROOT / "eventGenerator.py"))
     command = [
-        astk_command, "dsflow",
-        "-od", relative_job_path(job_dir, output_dir),
-        "-md", relative_job_path(job_dir, metadata_json),
-        "-gtf", reference["gtf"],
-        "-et", config.get("event_type", "ALL"),
-        "-m", config.get("method", "empirical"),
-        "-p", str(config.get("p_value", 0.05)),
-        "-adpsi", str(config.get("abs_dpsi", 0.1)),
+        os.getenv("SUPPA_PYTHON") or os.getenv("PYTHON_COMMAND") or "python3",
+        suppa_command,
+        "-i", reference["gtf"],
+        "-o", relative_job_path(job_dir, output_dir / "events" / "events"),
+        "-f", "ioe",
+        "-e", "SE", "SS", "MX", "RI", "FL",
+        "-b", "S",
     ]
     plan = {
         "version": 1,
+        "engine": "suppa2",
         "species": species,
         "reference": reference,
         "input_format": "astk" if native_astk_input else "studio",
         "sample_count": sample_count,
         "p_value": float(config.get("p_value", 0.05)),
         "abs_dpsi": float(config.get("abs_dpsi", 0.1)),
+        "method": str(config.get("method", "empirical")),
         "comparisons": plan_comparisons,
         "metadata_json": relative_job_path(job_dir, metadata_json),
         "metadata_csv": relative_job_path(job_dir, metadata_csv),

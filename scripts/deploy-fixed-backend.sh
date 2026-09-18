@@ -42,7 +42,12 @@ if ! grep -q '^ASTK_TRUST_PROXY=' "$ENV_FILE"; then
 fi
 
 cd "$APP_DIR"
-docker compose up --build -d
+if [[ -n "${ASTK_BACKEND_IMAGE:-}" ]]; then
+  docker compose pull
+  docker compose up -d
+else
+  docker compose up --build -d
+fi
 
 for _ in $(seq 1 30); do
   if curl -fsS --max-time 5 http://127.0.0.1:4173/api/health >/dev/null 2>&1; then

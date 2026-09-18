@@ -5,7 +5,7 @@ reproducible test cases, and focused pull requests are welcome.
 
 ## Before opening an issue
 
-- Check whether the problem belongs to ASTK Studio or the ASTK command-line tool.
+- Check whether the problem belongs to ASTK Studio or the bundled SUPPA2 engine.
 - Remove private, controlled-access, or personally identifiable data.
 - Include the operating system, deployment method, browser, and relevant logs.
 - For analysis failures, include a minimal `samples.csv` and the generated
@@ -30,8 +30,9 @@ node --check app.js
 python3 scripts/build_pages.py
 ```
 
-Real ASTK execution requires Linux and the ASTK runtime. Frontend and API changes
-can be tested in demo mode without ASTK installed.
+Real analysis execution requires Linux and the Python scientific stack. The
+bundled SUPPA2 source is under `vendor/suppa2`; frontend and API changes can be
+tested in demo mode without those dependencies.
 
 ## Pull requests
 

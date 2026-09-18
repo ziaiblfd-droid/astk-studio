@@ -210,7 +210,8 @@ def parse_results(job_dir: Path, gtf_path: Path | None = None, preview_limit: in
         "images": collect_images(job_dir),
         "comparisons": comparisons,
         "reference": plan.get("reference", {}),
-        "mode": "astk",
+        "engine": plan.get("engine", "suppa2"),
+        "mode": "suppa2",
     }
     output = job_dir / "output" / "results.json"
     output.write_text(json.dumps(results, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -218,7 +219,7 @@ def parse_results(job_dir: Path, gtf_path: Path | None = None, preview_limit: in
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Parse ASTK output for ASTK Studio")
+    parser = argparse.ArgumentParser(description="Parse SUPPA2 output for ASTK Studio")
     parser.add_argument("job_dir", type=Path)
     parser.add_argument("--gtf", type=Path)
     args = parser.parse_args()

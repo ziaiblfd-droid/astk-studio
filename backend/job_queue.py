@@ -4,6 +4,7 @@ import os
 import queue
 import threading
 from collections.abc import Callable
+from typing import Any
 
 
 class JobQueue:
@@ -30,3 +31,24 @@ class JobQueue:
                 self.worker(job_id)
             finally:
                 self.pending.task_done()
+
+
+def recover_pending_jobs(store: Any, job_queue: JobQueue) -> list[str]:
+    recovered: list[str] = []
+    for directory in sorted(store.root.iterdir()):
+        if not directory.is_dir() or directory.name.startswith("."):
+            continue
+        job = store.read(directory.name)
+        if job is None or job.get("status") not in {"queued", "running"}:
+            continue
+        if job.get("status") == "running":
+            store.update(
+                directory.name,
+                status="queued",
+                stage="Queued after service restart",
+                progress=0,
+                error=None,
+            )
+        job_queue.submit(directory.name)
+        recovered.append(directory.name)
+    return recovered

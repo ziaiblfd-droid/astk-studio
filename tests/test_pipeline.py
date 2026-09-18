@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import io
 import json
 import tempfile
 import unittest
@@ -8,10 +9,19 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from backend.cleanup import cleanup_expired_jobs
+from backend.execute_suppa import read_tpm, validate_group, write_expression_matrix
+from backend.job_queue import recover_pending_jobs
+from backend.multipart import parse_multipart_stream
 from backend.planner import InputError, native_comparison_label, prepare_job, safe_extract_zip
 from backend.result_parser import parse_results
 from backend.server import validate_analysis_files
-from backend.visualization import filter_significant_dpsi, load_comparisons, prepare_heatmap_inputs
+from backend.store import JobStore
+from backend.visualization import (
+    filter_significant_dpsi,
+    generate_visualizations,
+    load_comparisons,
+    prepare_heatmap_inputs,
+)
 
 
 QUANT = "Name\tLength\tEffectiveLength\tTPM\tNumReads\nTX1\t1000\t800\t12.5\t10\n"
@@ -62,8 +72,47 @@ class PipelineTests(unittest.TestCase):
             self.assertEqual(len(metadata["E11_5_vs_E12_5"]["ctrl"]["samples"]), 2)
             self.assertEqual(len(metadata["E11_5_vs_E12_5"]["case"]["samples"]), 1)
             self.assertEqual(plan["comparisons"][0]["group"], "E11_5_vs_E12_5")
-            self.assertIn("dsflow", plan["command"])
-            self.assertIn("0.1", plan["command"])
+            self.assertEqual(plan["engine"], "suppa2")
+            self.assertTrue(plan["command"][1].endswith("eventGenerator.py"))
+            self.assertIn("SE", plan["command"])
+            self.assertIn("FL", plan["command"])
+
+    def test_suppa_expression_matrix_and_replicate_validation(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            first = root / "first" / "quant.sf"
+            second = root / "second" / "quant.sf"
+            first.parent.mkdir(parents=True)
+            second.parent.mkdir(parents=True)
+            first.write_text(
+                "Name\tLength\tEffectiveLength\tTPM\tNumReads\n"
+                "TX1\t1000\t800\t12.5\t10\n"
+                "TX2\t900\t700\t0\t0\n",
+                encoding="utf-8",
+            )
+            second.write_text(
+                "Name\tLength\tEffectiveLength\tTPM\tNumReads\n"
+                "TX1\t1000\t800\t5\t4\n"
+                "TX2\t900\t700\t7.5\t6\n",
+                encoding="utf-8",
+            )
+            output = root / "expression.tsv"
+            write_expression_matrix(output, [("ctrl1", first), ("ctrl2", second)])
+            lines = output.read_text(encoding="utf-8").splitlines()
+            self.assertEqual(lines[0], "ctrl1\tctrl2")
+            self.assertEqual(lines[1], "TX1\t12.5\t5")
+            self.assertEqual(lines[2], "TX2\t0\t7.5")
+            self.assertEqual(read_tpm(first)["TX1"], 12.5)
+
+            roles = {
+                "ctrl": {"samples": [{"name": "ctrl1", "path": str(first)}]},
+                "case": {"samples": [{"name": "case1", "path": str(second)}]},
+            }
+            with self.assertRaises(InputError):
+                validate_group("empirical", "g1", roles)
+            roles["ctrl"]["samples"].append({"name": "ctrl2", "path": str(second)})
+            roles["case"]["samples"].append({"name": "case2", "path": str(second)})
+            validate_group("empirical", "g1", roles)
 
     def test_planner_accepts_native_astk_csv_with_original_filename(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -90,6 +139,28 @@ class PipelineTests(unittest.TestCase):
             self.assertEqual(metadata["facial_11.5_12"]["case"]["samples"][0]["name"], "e12_r1")
             self.assertTrue(metadata["facial_11.5_12"]["case"]["samples"][0]["path"].endswith("quant/e12_r1/quant.sf"))
             self.assertEqual(metadata_csv.splitlines()[0], "group,condition,name,path,replicate")
+
+    def test_native_astk_group_names_cannot_escape_job_paths(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            job_dir = self.make_job(Path(temporary))
+            input_dir = job_dir / "input"
+            (input_dir / "unsafe.csv").write_text(
+                "group,condition,name,path,replicate\n"
+                "../../escape,ctrl,e11_r1,quant/e11_r1/quant.sf,1\n"
+                "../../escape,ctrl,e11_r2,quant/e11_r2/quant.sf,2\n"
+                "../../escape,case,e12_r1,quant/e12_r1/quant.sf,1\n"
+                "../../escape,case,e13_r1,quant/e13_r1/quant.sf,2\n",
+                encoding="utf-8",
+            )
+            (input_dir / "samples.csv").unlink()
+
+            plan = prepare_job(job_dir)
+
+            group = plan["comparisons"][0]["group"]
+            self.assertNotIn("/", group)
+            self.assertNotIn("..", group)
+            self.assertNotEqual(group, "../../escape")
+            self.assertTrue(group)
 
     def test_native_comparison_labels_use_sample_periods(self) -> None:
         control, treatment, label = native_comparison_label(
@@ -187,6 +258,50 @@ class PipelineTests(unittest.TestCase):
             self.assertEqual(comparisons[0]["treatment"], "12.5")
             self.assertEqual(comparisons[0]["label"], "11.5 → 12.5")
 
+    def test_suppa_visualizations_write_expected_files(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            job_dir = Path(temporary) / "ASTK-TEST"
+            analysis = job_dir / "output" / "analysis"
+            (analysis / "psi").mkdir(parents=True)
+            (analysis / "dpsi").mkdir(parents=True)
+            plan = {
+                "p_value": 0.05,
+                "abs_dpsi": 0.1,
+                "comparisons": [
+                    {"group": "g1", "control": "A", "treatment": "B", "label": "A -> B"},
+                    {"group": "g2", "control": "A", "treatment": "C", "label": "A -> C"},
+                ],
+            }
+            event = "G1;SE:chr1:100-200:300-400:+"
+            second = "G2;SE:chr1:500-600:700-800:+"
+            for group in ("g1", "g2"):
+                for suffix in ("c1", "c2"):
+                    (analysis / "psi" / f"{group}_SE_{suffix}.psi").write_text(
+                        f"event_id\t{group}_{suffix}_1\t{group}_{suffix}_2\n"
+                        f"{event}\t0.1\t0.2\n"
+                        f"{second}\t0.8\t0.7\n",
+                        encoding="utf-8",
+                    )
+                (analysis / "dpsi" / f"{group}_SE.dpsi").write_text(
+                    "Event_id\tdPSI\tp-val\n"
+                    f"{event}\t0.5\t0.001\n"
+                    f"{second}\t-0.4\t0.002\n",
+                    encoding="utf-8",
+                )
+
+            generate_visualizations(job_dir, plan)
+
+            expected = [
+                analysis / "img" / "bar" / "g1.png",
+                analysis / "img" / "PCA" / "SE.png",
+                analysis / "img" / "heatmap" / "SE.png",
+                analysis / "img" / "volcano" / "g1_SE.png",
+                analysis / "img" / "upset" / "SE.png",
+                analysis / "sig01" / "dpsi" / "g1_SE.sig.dpsi",
+            ]
+            for path in expected:
+                self.assertTrue(path.exists(), str(path))
+
     def test_result_parser_summarizes_astk_outputs(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             job_dir = self.make_job(Path(temporary))
@@ -242,6 +357,47 @@ class PipelineTests(unittest.TestCase):
             validate_analysis_files([("quant.zip", b"zip"), ("facial_11.csv", b"csv"), ("extra.csv", b"csv")])
         with self.assertRaises(ValueError):
             validate_analysis_files([("quant.zip", b"zip"), ("metadata.txt", b"text")])
+
+    def test_streaming_multipart_parser_preserves_binary_file(self) -> None:
+        boundary = "----astk-test-boundary"
+        payload = b"\x00\x01binary\r\n--not-the-boundary\r\nzip"
+        body = (
+            f"--{boundary}\r\n"
+            'Content-Disposition: form-data; name="config"\r\n\r\n'
+            '{"species":"mm10"}\r\n'
+            f"--{boundary}\r\n"
+            'Content-Disposition: form-data; name="files"; filename="quant.zip"\r\n'
+            "Content-Type: application/zip\r\n\r\n"
+        ).encode("utf-8") + payload + f"\r\n--{boundary}--\r\n".encode("ascii")
+        with tempfile.TemporaryDirectory() as temporary:
+            fields, files = parse_multipart_stream(
+                io.BytesIO(body),
+                len(body),
+                f'multipart/form-data; boundary="{boundary}"',
+                Path(temporary),
+                max_part_bytes=1024,
+            )
+            self.assertEqual(fields["config"], '{"species":"mm10"}')
+            self.assertEqual(files[0][0], "quant.zip")
+            self.assertEqual(files[0][1].read_bytes(), payload)
+
+    def test_pending_jobs_are_recovered_after_restart(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            store = JobStore(Path(temporary))
+            store.create("ASTK-QUEUED", {})
+            store.create("ASTK-RUNNING", {})
+            store.update("ASTK-RUNNING", status="running", stage="Running")
+            submitted: list[str] = []
+
+            class Queue:
+                def submit(self, job_id: str) -> None:
+                    submitted.append(job_id)
+
+            recovered = recover_pending_jobs(store, Queue())
+
+            self.assertEqual(recovered, ["ASTK-QUEUED", "ASTK-RUNNING"])
+            self.assertEqual(submitted, recovered)
+            self.assertEqual(store.read("ASTK-RUNNING")["status"], "queued")
 
     def test_cleanup_removes_only_expired_finished_jobs(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

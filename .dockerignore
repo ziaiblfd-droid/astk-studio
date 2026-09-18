@@ -13,7 +13,6 @@ CONTRIBUTING.md
 references/*
 !references/README.md
 deploy
-tests
 docs
 scripts/check-public-access.sh
 scripts/start-localtunnel.sh

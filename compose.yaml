@@ -2,7 +2,7 @@ services:
   astk-studio:
     build:
       context: .
-    image: astk-studio:latest
+    image: ${ASTK_BACKEND_IMAGE:-astk-studio:latest}
     restart: unless-stopped
     ports:
       - "127.0.0.1:4173:4173"

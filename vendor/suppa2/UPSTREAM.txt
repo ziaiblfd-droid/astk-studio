@@ -1,0 +1,8 @@
+SUPPA2
+Version: v2.4
+Commit: cda335d4a028c1af3ade440b856df61753f18a99
+Source: https://github.com/comprna/SUPPA
+License: MIT (see LICENSE.txt)
+
+This directory contains the minimal set of SUPPA2 source files required for
+generateEvents, psiPerEvent, and diffSplice. The upstream files are unmodified.
