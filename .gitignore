@@ -3,3 +3,4 @@ __pycache__/
 data/jobs/
 .env
 dist/
+.streamlit/secrets.toml

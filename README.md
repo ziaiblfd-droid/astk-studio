@@ -110,3 +110,35 @@ docker compose up --build -d
 3. 容器部署：使用仓库根目录的 `Dockerfile` 和 `compose.yaml`，把 `ASTK_HOST` 设为 `0.0.0.0`，并将数据卷挂载到持久化磁盘。
 
 直接暴露 `4173` 端口只适合临时测试。正式公开前应配置域名、HTTPS、身份认证、上传限制和定期备份。Nginx 示例中的 `astk.example.com` 需要替换为实际域名。
+
+## Streamlit Cloud 固定前端
+
+仓库还提供了一个 Streamlit 入口 `streamlit_app.py`。它可以把界面部署到固定的
+`https://<app-name>.streamlit.app` 地址，同时把计算任务提交给远程 ASTK 后端：
+
+```text
+用户 -> Streamlit Cloud -> Linux ASTK API -> ASTK 计算
+```
+
+本地运行：
+
+```powershell
+py -3 -m pip install -r requirements.txt
+$env:ASTK_BACKEND_URL = "http://127.0.0.1:4173"
+py -3 -m streamlit run streamlit_app.py
+```
+
+部署到 Streamlit Community Cloud：
+
+1. 将仓库推送到 GitHub。
+2. 在 Streamlit Community Cloud 创建 App，选择本仓库和 `main` 分支。
+3. 入口文件填写 `streamlit_app.py`。
+4. 在 App 的 Secrets 中配置 `ASTK_BACKEND_URL`：
+
+```toml
+ASTK_BACKEND_URL = "https://your-astk-backend.example.com"
+```
+
+Streamlit 会提供固定 HTTPS 地址。真正的 ASTK 计算仍由 Linux 服务执行，因此
+Streamlit 免费实例休眠或重建时，已经提交到后端的任务不会因此丢失。后端地址必须
+是长期稳定的 HTTPS 地址；临时 TryCloudflare 地址会变化，只适合测试。
