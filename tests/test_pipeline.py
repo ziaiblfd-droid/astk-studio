@@ -18,9 +18,11 @@ from backend.result_parser import parse_results
 from backend.server import resolve_public_file, validate_analysis_files
 from backend.store import JobStore
 from backend.visualization import (
+    VOLCANO_PVALUE_FLOOR,
     filter_significant_dpsi,
     generate_visualizations,
     load_comparisons,
+    plot_volcano,
     prepare_heatmap_inputs,
 )
 
@@ -254,6 +256,23 @@ class PipelineTests(unittest.TestCase):
             count = filter_significant_dpsi(source, output, p_value=0.25, abs_dpsi=0.1)
             self.assertEqual(count, 2)
             self.assertEqual(output.read_text(encoding="utf-8").splitlines()[-1], "keep-down\t-0.11\t0.24")
+
+    def test_volcano_caps_exact_zero_pvalues(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = root / "events.dpsi"
+            image = root / "volcano.png"
+            source.write_text(
+                "event_id\tdPSI\tp-value\n"
+                "zero\t0.5\t0\n"
+                "ordinary\t-0.2\t0.01\n",
+                encoding="utf-8",
+            )
+
+            plot_volcano(image, "test", source, p_value=0.05, abs_dpsi=0.1)
+
+            self.assertTrue(image.is_file())
+            self.assertEqual(VOLCANO_PVALUE_FLOOR, 1e-16)
 
     def test_heatmap_inputs_select_top_shared_events(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

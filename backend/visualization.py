@@ -13,6 +13,7 @@ from .planner import native_comparison_label
 EVENT_TYPES = ("A3", "A5", "AF", "AL", "MX", "RI", "SE")
 HEATMAP_TOP_EVENTS = 60
 UPSET_MAX_COMPARISONS = 6
+VOLCANO_PVALUE_FLOOR = 1e-16
 
 
 def _numpy():
@@ -323,9 +324,12 @@ def plot_volcano(
     plt = _pyplot()
     np = _numpy()
     dpsi = np.array([row[1] for row in rows], dtype=float)
-    pvalues = np.maximum(np.array([row[2] for row in rows], dtype=float), np.finfo(float).tiny)
-    minus_log = -np.log10(pvalues)
-    significant = (pvalues < p_value) & (np.abs(dpsi) > abs_dpsi)
+    raw_pvalues = np.array([row[2] for row in rows], dtype=float)
+    # SUPPA2/ASTK can emit exact zeros. Plotting against float.tiny creates a
+    # ~308 y-axis and hides the nonzero points in an otherwise valid plot.
+    plot_pvalues = np.maximum(raw_pvalues, VOLCANO_PVALUE_FLOOR)
+    minus_log = -np.log10(plot_pvalues)
+    significant = (raw_pvalues < p_value) & (np.abs(dpsi) > abs_dpsi)
 
     figure, axis = plt.subplots(figsize=(6.8, 5.2))
     axis.scatter(dpsi[~significant], minus_log[~significant], s=9, c="#95a7a0", alpha=0.45, linewidths=0)
