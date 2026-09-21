@@ -357,13 +357,17 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-if "astk_backend_url" not in st.session_state:
-    st.session_state["astk_backend_url"] = setting("ASTK_BACKEND_URL", DEFAULT_BACKEND_URL) or DEFAULT_BACKEND_URL
+configured_backend = setting("ASTK_BACKEND_URL")
+if configured_backend:
+    # Secrets can change while a user keeps a Streamlit session open. Keep the
+    # configured endpoint authoritative without clearing uploaded files.
+    st.session_state["astk_backend_url"] = configured_backend
+elif "astk_backend_url" not in st.session_state:
+    st.session_state["astk_backend_url"] = DEFAULT_BACKEND_URL
 
 with st.sidebar:
     st.markdown("## ASTK Studio")
     st.caption("固定前端地址 · 远程计算后端")
-    configured_backend = setting("ASTK_BACKEND_URL")
     st.text_input(
         "后端地址",
         key="astk_backend_url",
