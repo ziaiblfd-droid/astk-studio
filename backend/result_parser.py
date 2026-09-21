@@ -166,7 +166,10 @@ def parse_results(job_dir: Path, gtf_path: Path | None = None, preview_limit: in
     }
     gene_names = load_gene_names(gtf_path)
     events_by_type: dict[str, set[str]] = defaultdict(set)
-    for path in (analysis_dir / "psi").glob("*.psi"):
+    count_sources = sorted((analysis_dir / "dpsi").glob("*.dpsi"))
+    if not count_sources:
+        count_sources = sorted((analysis_dir / "psi").glob("*.psi"))
+    for path in count_sources:
         for event_id in read_event_ids(path):
             events_by_type[event_type(event_id, path.name)].add(event_id)
     significant_rows: list[list[str]] = []

@@ -12,7 +12,8 @@
     <link rel="stylesheet" href="styles.css?v=20260918" />
     <link rel="stylesheet" href="responsive.css?v=20260918" />
     <link rel="stylesheet" href="github-pages.css?v=20260918" />
-    <script src="app.js?v=20260918" defer></script>
+    <link rel="stylesheet" href="sample-groups.css?v=20260921" />
+    <script src="app.js?v=20260921b" defer></script>
   </head>
   <body>
     <div class="app-shell">
@@ -77,6 +78,19 @@
                 <div class="upload-icon"><i data-lucide="upload-cloud"></i></div><div><strong>拖入 quant.zip 与 CSV 样本表</strong><span>CSV 文件名无需修改 · ZIP 内保留每个样本的 quant.sf 目录 · 单次最大 512 MB</span></div><button class="button mini" id="browse-files">选择文件</button><input type="file" id="file-input" multiple hidden accept=".zip,.csv" />
               </div>
               <div class="file-list" id="file-list"></div>
+              <div class="sample-group-panel" id="sample-group-panel" hidden>
+                <div class="sample-group-head">
+                  <div><strong>样本与分组</strong><span>上传 CSV 后，可以为每个样本单独修改分组名称。</span></div>
+                  <label class="baseline-picker"><span>对照分组</span><select id="baseline-group"></select></label>
+                </div>
+                <div class="sample-table-wrap">
+                  <table class="sample-table">
+                    <thead><tr><th>样本名</th><th>分组</th></tr></thead>
+                    <tbody id="sample-group-rows"></tbody>
+                  </table>
+                </div>
+                <div class="sample-group-hint" id="sample-group-hint"></div>
+              </div>
               <div class="run-options"><label class="check-option"><input type="checkbox" checked /><span class="checkmark"></span><span>生成全部七类事件</span></label><label class="check-option"><input type="checkbox" checked /><span class="checkmark"></span><span>输出交互式报告</span></label><label class="check-option"><input type="checkbox" /><span class="checkmark"></span><span>运行序列特征模块</span></label></div>
               <a class="template-link" href="templates/samples.csv" download><i data-lucide="file-down"></i>下载 ASTK samples.csv 模板</a>
             </section>

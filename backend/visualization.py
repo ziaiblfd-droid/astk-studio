@@ -36,6 +36,10 @@ def plan_threshold(plan: dict[str, Any], key: str, default: float) -> float:
     return default
 
 
+def uses_native_astk(plan: dict[str, Any]) -> bool:
+    return "astk" in str(plan.get("engine", "")).lower()
+
+
 def filter_significant_dpsi(
     source: Path,
     destination: Path,
@@ -276,17 +280,21 @@ def plot_bar(
     sources: dict[str, Path],
     p_value: float,
     abs_dpsi: float,
+    prefiltered: bool = False,
 ) -> None:
     plt = _pyplot()
     np = _numpy()
     up: list[int] = []
     down: list[int] = []
     for kind in EVENT_TYPES:
-        rows = [
-            (dpsi, pval)
-            for _, dpsi, pval in read_dpsi(sources.get(kind, Path("")))
-            if pval < p_value and abs(dpsi) > abs_dpsi
-        ]
+        if prefiltered:
+            rows = [(dpsi, pval) for _, dpsi, pval in read_dpsi(sources.get(kind, Path("")))]
+        else:
+            rows = [
+                (dpsi, pval)
+                for _, dpsi, pval in read_dpsi(sources.get(kind, Path("")))
+                if pval < p_value and abs(dpsi) > abs_dpsi
+            ]
         up.append(sum(dpsi > 0 for dpsi, _ in rows))
         down.append(sum(dpsi < 0 for dpsi, _ in rows))
 
@@ -435,6 +443,7 @@ def generate_visualizations(job_dir: Path, plan: dict[str, Any]) -> str:
     abs_dpsi = plan_threshold(plan, "abs_dpsi", 0.1)
     significant: dict[tuple[str, str], Path] = {}
     log: list[str] = []
+    native_significant = uses_native_astk(plan)
 
     for comparison in comparisons:
         group = comparison["group"]
@@ -443,12 +452,16 @@ def generate_visualizations(job_dir: Path, plan: dict[str, Any]) -> str:
             if not source.exists():
                 continue
             destination = analysis / "sig01" / "dpsi" / f"{group}_{kind}.sig.dpsi"
-            filter_significant_dpsi(source, destination, p_value, abs_dpsi)
+            if not native_significant or not destination.exists():
+                filter_significant_dpsi(source, destination, p_value, abs_dpsi)
             significant[(group, kind)] = destination
 
     for comparison in comparisons:
         group = comparison["group"]
-        sources = {kind: analysis / "dpsi" / f"{group}_{kind}.dpsi" for kind in EVENT_TYPES}
+        if native_significant:
+            sources = {kind: significant[(group, kind)] for kind in EVENT_TYPES if (group, kind) in significant}
+        else:
+            sources = {kind: analysis / "dpsi" / f"{group}_{kind}.dpsi" for kind in EVENT_TYPES}
         try:
             plot_bar(
                 image_root / "bar" / f"{group}.png",
@@ -456,6 +469,7 @@ def generate_visualizations(job_dir: Path, plan: dict[str, Any]) -> str:
                 sources,
                 p_value,
                 abs_dpsi,
+                prefiltered=native_significant,
             )
             log.append(f"Generated bar plot for {group}")
         except Exception as error:

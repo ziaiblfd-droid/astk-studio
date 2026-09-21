@@ -12,6 +12,7 @@ from backend.cleanup import cleanup_expired_jobs
 from backend.execute_suppa import read_tpm, validate_group, write_expression_matrix
 from backend.job_queue import recover_pending_jobs
 from backend.multipart import parse_multipart_stream
+from backend.native_astk import canonicalize_native_outputs
 from backend.planner import InputError, native_comparison_label, prepare_job, safe_extract_zip
 from backend.result_parser import parse_results
 from backend.server import validate_analysis_files
@@ -162,6 +163,7 @@ class PipelineTests(unittest.TestCase):
             self.assertNotEqual(group, "../../escape")
             self.assertTrue(group)
 
+
     def test_native_comparison_labels_use_sample_periods(self) -> None:
         control, treatment, label = native_comparison_label(
             "facial_11.5_12",
@@ -173,6 +175,34 @@ class PipelineTests(unittest.TestCase):
         self.assertEqual(control, "11.5")
         self.assertEqual(treatment, "12.5")
         self.assertEqual(label, "11.5 → 12.5")
+
+    def test_native_astk_outputs_are_canonicalized(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            native = root / "native"
+            analysis = root / "analysis"
+            (native / "ref").mkdir(parents=True)
+            (native / "psi").mkdir(parents=True)
+            (native / "dpsi").mkdir(parents=True)
+            (native / "sig01").mkdir(parents=True)
+            (native / "ref" / "annotation_SE_strict.ioe").write_text("event_id\n", encoding="utf-8")
+            for suffix in ("c1", "c2"):
+                (native / "psi" / f"g1_SE_{suffix}.psi").write_text("event_id\n", encoding="utf-8")
+            (native / "dpsi" / "g1_SE.dpsi").write_text("event_id\tdPSI\tp-value\n", encoding="utf-8")
+            (native / "sig01" / "g1_SE.sig.dpsi").write_text("event_id\tdPSI\tp-value\n", encoding="utf-8")
+
+            copied = canonicalize_native_outputs(
+                native,
+                analysis,
+                [{"group": "g1"}],
+                0.1,
+            )
+
+            self.assertEqual(copied["events"], 1)
+            self.assertEqual(copied["psi"], 2)
+            self.assertEqual(copied["dpsi"], 1)
+            self.assertEqual(copied["significant"], 1)
+            self.assertTrue((analysis / "sig01" / "dpsi" / "g1_SE.sig.dpsi").is_file())
 
     def test_significant_dpsi_filter_uses_astk_strict_thresholds(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from .planner import InputError, prepare_job
+from .native_astk import run_native_astk, select_engine
 from .result_parser import parse_results
 from .visualization import generate_visualizations
 
@@ -155,76 +156,82 @@ def execute(job_dir: Path) -> None:
 
     runner = SuppaRunner(job_dir)
     log_path = job_dir / "output" / "runner.log"
-    runner.run(
-        "eventGenerator.py",
-        [
-            "-i", plan["reference"]["gtf"],
-            "-o", events_dir / "events",
-            "-f", "ioe",
-            "-e", "SE", "SS", "MX", "RI", "FL",
-            "-b", "S",
-            "-m", "WARNING",
-        ],
-        log_path,
-    )
-
     metadata = load_metadata(job_dir, plan)
     method = str(plan.get("method", "empirical")).lower()
     if method not in {"empirical", "classical"}:
         raise InputError(f"Unsupported differential splicing method: {method}")
 
-    for comparison in plan["comparisons"]:
-        group = comparison["group"]
-        roles = metadata.get(group)
-        if not isinstance(roles, dict):
-            raise InputError(f"Missing metadata for comparison group: {group}")
-        validate_group(method, group, roles)
+    engine = select_engine(job_dir, metadata)
+    if engine == "astk":
+        for message in run_native_astk(job_dir, plan, metadata):
+            runner.append(message, log_path)
+    else:
+        runner.append("=== PORTABLE SUPPA2 ENGINE ===", log_path)
+        runner.run(
+            "eventGenerator.py",
+            [
+                "-i", plan["reference"]["gtf"],
+                "-o", events_dir / "events",
+                "-f", "ioe",
+                "-e", "SE", "SS", "MX", "RI", "FL",
+                "-b", "S",
+                "-m", "WARNING",
+            ],
+            log_path,
+        )
 
-        expressions: dict[str, Path] = {}
-        for role, suffix in (("ctrl", "c1"), ("case", "c2")):
-            samples = roles.get(role, {}).get("samples", [])
-            expression_path = expression_dir / f"{group}_{role}.tsv"
-            write_expression_matrix(expression_path, sample_rows(job_dir, samples))
-            expressions[role] = expression_path
+        for comparison in plan["comparisons"]:
+            group = comparison["group"]
+            roles = metadata.get(group)
+            if not isinstance(roles, dict):
+                raise InputError(f"Missing metadata for comparison group: {group}")
+            validate_group(method, group, roles)
 
-        for kind in EVENT_TYPES:
-            ioe_path = events_dir / f"events_{kind}_strict.ioe"
-            if not ioe_path.exists():
-                continue
-            psi_paths: dict[str, Path] = {}
+            expressions: dict[str, Path] = {}
             for role, suffix in (("ctrl", "c1"), ("case", "c2")):
-                psi_prefix = psi_dir / f"{group}_{kind}_{suffix}"
-                runner.run(
-                    "psiCalculator.py",
-                    [
-                        "-i", ioe_path,
-                        "-e", expressions[role],
-                        "-o", psi_prefix,
-                        "-m", "WARNING",
-                    ],
-                    log_path,
-                )
-                psi_paths[role] = Path(f"{psi_prefix}.psi")
-                if not psi_paths[role].exists():
-                    raise RuntimeError(f"SUPPA did not create {psi_paths[role]}")
+                samples = roles.get(role, {}).get("samples", [])
+                expression_path = expression_dir / f"{group}_{role}.tsv"
+                write_expression_matrix(expression_path, sample_rows(job_dir, samples))
+                expressions[role] = expression_path
 
-            dpsi_prefix = dpsi_dir / f"{group}_{kind}"
-            arguments = [
-                "-m", method,
-                "-i", ioe_path,
-                "-p", psi_paths["ctrl"], psi_paths["case"],
-                "-e", expressions["ctrl"], expressions["case"],
-                "-l", str(plan["abs_dpsi"]),
-                "-o", dpsi_prefix,
-                "-mo", "WARNING",
-            ]
-            runner.run("significanceCalculator.py", arguments, log_path)
-            dpsi_path = Path(f"{dpsi_prefix}.dpsi")
-            if not dpsi_path.exists():
-                raise RuntimeError(f"SUPPA did not create {dpsi_path}")
-            psivec_path = Path(f"{dpsi_prefix}.psivec")
-            if psivec_path.exists():
-                psivec_path.unlink()
+            for kind in EVENT_TYPES:
+                ioe_path = events_dir / f"events_{kind}_strict.ioe"
+                if not ioe_path.exists():
+                    continue
+                psi_paths: dict[str, Path] = {}
+                for role, suffix in (("ctrl", "c1"), ("case", "c2")):
+                    psi_prefix = psi_dir / f"{group}_{kind}_{suffix}"
+                    runner.run(
+                        "psiCalculator.py",
+                        [
+                            "-i", ioe_path,
+                            "-e", expressions[role],
+                            "-o", psi_prefix,
+                            "-m", "WARNING",
+                        ],
+                        log_path,
+                    )
+                    psi_paths[role] = Path(f"{psi_prefix}.psi")
+                    if not psi_paths[role].exists():
+                        raise RuntimeError(f"SUPPA did not create {psi_paths[role]}")
+
+                dpsi_prefix = dpsi_dir / f"{group}_{kind}"
+                arguments = [
+                    "-m", method,
+                    "-i", ioe_path,
+                    "-p", psi_paths["ctrl"], psi_paths["case"],
+                    "-e", expressions["ctrl"], expressions["case"],
+                    "-l", str(plan["abs_dpsi"]),
+                    "-o", dpsi_prefix,
+                    "-mo", "WARNING",
+                ]
+                runner.run("significanceCalculator.py", arguments, log_path)
+                dpsi_path = Path(f"{dpsi_prefix}.dpsi")
+                if not dpsi_path.exists():
+                    raise RuntimeError(f"SUPPA did not create {dpsi_path}")
+                psivec_path = Path(f"{dpsi_prefix}.psivec")
+                if psivec_path.exists():
+                    psivec_path.unlink()
 
     runner.append("=== VISUALIZATION ===", log_path)
     plot_log = generate_visualizations(job_dir, plan)
