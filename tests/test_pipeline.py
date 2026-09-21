@@ -15,7 +15,7 @@ from backend.multipart import parse_multipart_stream
 from backend.native_astk import canonicalize_native_outputs
 from backend.planner import InputError, native_comparison_label, prepare_job, safe_extract_zip
 from backend.result_parser import parse_results
-from backend.server import validate_analysis_files
+from backend.server import resolve_public_file, validate_analysis_files
 from backend.store import JobStore
 from backend.visualization import (
     filter_significant_dpsi,
@@ -421,6 +421,13 @@ class PipelineTests(unittest.TestCase):
             validate_analysis_files([("quant.zip", b"zip"), ("facial_11.csv", b"csv"), ("extra.csv", b"csv")])
         with self.assertRaises(ValueError):
             validate_analysis_files([("quant.zip", b"zip"), ("metadata.txt", b"text")])
+
+    def test_only_explicit_public_files_are_served(self) -> None:
+        self.assertEqual(resolve_public_file("/").name, "index.html")
+        self.assertEqual(resolve_public_file("/app.js").name, "app.js")
+        self.assertEqual(resolve_public_file("/templates/samples.csv").name, "samples.csv")
+        for path in ("/.git/config", "/backend/server.py", "/data/jobs/", "/../README.md"):
+            self.assertIsNone(resolve_public_file(path))
 
     def test_streaming_multipart_parser_preserves_binary_file(self) -> None:
         boundary = "----astk-test-boundary"

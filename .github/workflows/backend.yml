@@ -45,10 +45,12 @@ jobs:
           tags: astk-studio:ci
           cache-from: type=gha
           cache-to: type=gha,mode=max
-      - name: Verify SUPPA modules
+      - name: Verify native ASTK and portable SUPPA modules
         run: >-
           docker run --rm --entrypoint python3 astk-studio:ci -c
-          "import sys; sys.path.insert(0, 'vendor/suppa2');
+          "import importlib.metadata, astk.suppa, sys;
+          print('ASTK', importlib.metadata.version('astk'));
+          sys.path.insert(0, 'vendor/suppa2');
           import eventGenerator, psiCalculator, significanceCalculator;
           print('SUPPA modules imported')"
       - name: Build ARM64 backend image

@@ -16,7 +16,7 @@
 - [ ] Test desktop and mobile layouts in the deployed Pages site.
 - [ ] Confirm that Pages clearly identifies itself as a no-upload demo.
 - [ ] Validate Docker build and real ASTK execution on a Linux host.
-- [ ] Confirm the backend host is `x86_64`; the current ASTK base image is AMD64 only.
+- [ ] Confirm the backend image builds and imports native ASTK on both `linux/amd64` and `linux/arm64`.
 - [ ] Test all seven event types with a small shareable dataset.
 - [ ] Run `scripts/verify-fixed-backend.sh` against the final HTTPS domain.
 - [ ] Confirm result ZIP contents and failure messages.

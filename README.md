@@ -102,7 +102,7 @@ references/hg38/gencode.v44.annotation.gtf
 docker compose up --build -d
 ```
 
-默认只启动一个 SUPPA2 worker，后续任务进入队列。可通过 `ASTK_WORKERS`
+默认只启动一个 ASTK worker，后续任务进入队列。可通过 `ASTK_WORKERS`
 调整并发数，但每个分析任务可能消耗较多 CPU 和内存。
 
 ## 公网 Linux 部署
@@ -117,8 +117,9 @@ docker compose up --build -d
 
 ### 固定后端最短路径
 
-新的后端镜像基于标准 Python 3.12，使用内置 SUPPA2 v2.4 和轻量科学计算依赖，
-可在 `linux/amd64` 和 `linux/arm64` 上构建。正式分支会同时推送
+新的后端镜像基于标准 Python 3.12，固定安装 ASTK `dev` 分支提交
+`db165a2e5e6c5cc63305247e87409b1e1362fd90`，并保留内置 SUPPA2 v2.4 作为兼容回退。
+镜像可在 `linux/amd64` 和 `linux/arm64` 上构建。正式分支会同时推送
 `ghcr.io/<owner>/astk-studio-backend:latest` 多架构镜像。准备一台持续在线的
 Linux VM、一个可配置 DNS 的域名和 TLS 邮箱后：
 

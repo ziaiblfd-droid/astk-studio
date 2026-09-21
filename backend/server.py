@@ -34,6 +34,16 @@ else:
 
 ROOT = Path(__file__).resolve().parent.parent
 STORE = JobStore(ROOT / "data" / "jobs")
+PUBLIC_FILES = {
+    "/": ROOT / "index.html",
+    "/index.html": ROOT / "index.html",
+    "/app.js": ROOT / "app.js",
+    "/styles.css": ROOT / "styles.css",
+    "/responsive.css": ROOT / "responsive.css",
+    "/github-pages.css": ROOT / "github-pages.css",
+    "/sample-groups.css": ROOT / "sample-groups.css",
+    "/templates/samples.csv": ROOT / "templates" / "samples.csv",
+}
 MAX_UPLOAD_BYTES = int(os.getenv("ASTK_MAX_UPLOAD_BYTES", str(512 * 1024 * 1024)))
 RETENTION_DAYS = float(os.getenv("ASTK_RETENTION_DAYS", "7"))
 CLEANUP_INTERVAL = max(60, int(os.getenv("ASTK_CLEANUP_INTERVAL", "3600")))
@@ -86,6 +96,10 @@ def validate_analysis_files(files: list[tuple[str, object]]) -> None:
         raise ValueError("Upload exactly one ZIP data package and one CSV sample table")
 
 
+def resolve_public_file(request_path: str) -> Path | None:
+    return PUBLIC_FILES.get(request_path)
+
+
 class ASTKHandler(SimpleHTTPRequestHandler):
     server_version = "ASTKStudio/0.1"
 
@@ -95,7 +109,7 @@ class ASTKHandler(SimpleHTTPRequestHandler):
     def log_message(self, format: str, *args) -> None:
         print(f"[{self.log_date_time_string()}] [{self.client_address_label()}] {format % args}")
 
-    def send_json(self, payload: object, status: int = 200) -> None:
+    def send_json(self, payload: object, status: int = 200, *, include_body: bool = True) -> None:
         data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
@@ -107,7 +121,8 @@ class ASTKHandler(SimpleHTTPRequestHandler):
         self.send_header("Pragma", "no-cache")
         self.send_header("Expires", "0")
         self.end_headers()
-        self.wfile.write(data)
+        if include_body:
+            self.wfile.write(data)
 
     def client_address_label(self) -> str:
         if TRUST_PROXY:
@@ -119,7 +134,14 @@ class ASTKHandler(SimpleHTTPRequestHandler):
     def do_GET(self) -> None:
         parsed = urlparse(self.path)
         if parsed.path == "/api/health":
-            self.send_json({"status": "ok", "execution_mode": os.getenv("ASTK_EXECUTION_MODE", "demo"), "queue": JOB_QUEUE.stats()})
+            self.send_json(
+                {
+                    "status": "ok",
+                    "execution_mode": os.getenv("ASTK_EXECUTION_MODE", "demo"),
+                    "engine_mode": os.getenv("ASTK_ENGINE", "auto"),
+                    "queue": JOB_QUEUE.stats(),
+                }
+            )
             return
         if parsed.path == "/api/templates/samples.csv":
             self.send_download(ROOT / "templates" / "samples.csv", filename="samples.csv")
@@ -150,7 +172,19 @@ class ASTKHandler(SimpleHTTPRequestHandler):
         if download_match:
             self.send_download(STORE.job_dir(download_match.group(1)) / "astk-report.zip")
             return
-        super().do_GET()
+        public_file = resolve_public_file(parsed.path)
+        if public_file and public_file.is_file():
+            self.send_file(public_file, cache_control="public, max-age=300")
+            return
+        self.send_json({"error": "Not found"}, 404)
+
+    def do_HEAD(self) -> None:
+        parsed = urlparse(self.path)
+        public_file = resolve_public_file(parsed.path)
+        if not public_file or not public_file.is_file():
+            self.send_json({"error": "Not found"}, 404, include_body=False)
+            return
+        self.send_file(public_file, cache_control="public, max-age=300", include_body=False)
 
     def do_POST(self) -> None:
         if self.path != "/api/jobs":
@@ -224,15 +258,25 @@ class ASTKHandler(SimpleHTTPRequestHandler):
             while chunk := handle.read(1024 * 1024):
                 self.wfile.write(chunk)
 
-    def send_file(self, path: Path) -> None:
-        data = path.read_bytes()
+    def send_file(
+        self,
+        path: Path,
+        *,
+        cache_control: str = "private, max-age=300",
+        include_body: bool = True,
+    ) -> None:
         content_type = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
         self.send_response(200)
         self.send_header("Content-Type", content_type)
-        self.send_header("Content-Length", str(len(data)))
-        self.send_header("Cache-Control", "private, max-age=300")
+        self.send_header("Content-Length", str(path.stat().st_size))
+        self.send_header("Cache-Control", cache_control)
+        self.send_header("X-Content-Type-Options", "nosniff")
         self.end_headers()
-        self.wfile.write(data)
+        if not include_body:
+            return
+        with path.open("rb") as handle:
+            while chunk := handle.read(1024 * 1024):
+                self.wfile.write(chunk)
 
 
 def main() -> None:

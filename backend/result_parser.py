@@ -214,7 +214,7 @@ def parse_results(job_dir: Path, gtf_path: Path | None = None, preview_limit: in
         "comparisons": comparisons,
         "reference": plan.get("reference", {}),
         "engine": plan.get("engine", "suppa2"),
-        "mode": "suppa2",
+        "mode": plan.get("engine", "suppa2"),
     }
     output = job_dir / "output" / "results.json"
     output.write_text(json.dumps(results, ensure_ascii=False, indent=2), encoding="utf-8")

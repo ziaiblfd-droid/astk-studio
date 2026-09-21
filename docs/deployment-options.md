@@ -6,8 +6,9 @@ ASTK 或 Conda 环境，也不必访问 `172.18.236.93`。
 
 ## 计算架构
 
-后端镜像基于标准 Python 3.12，内置 SUPPA2 v2.4 的 `generateEvents`、
-`psiPerEvent` 和 `diffSplice` 等价执行代码。输入为 Salmon `quant.sf` 和一个
+后端镜像基于标准 Python 3.12，固定安装 ASTK `dev` 分支提交
+`db165a2e5e6c5cc63305247e87409b1e1362fd90`，并保留内置 SUPPA2 v2.4 作为兼容回退。
+输入为 Salmon `quant.sf` 和一个
 CSV 分组表，输出七类可变剪切事件、PSI/dPSI 结果和图表。
 
 镜像发布到 GHCR：
@@ -17,7 +18,7 @@ ghcr.io/ziaiblfd-droid/astk-studio-backend:latest
 ```
 
 GitHub Actions 在 `main` 分支推送时构建并发布 `linux/amd64` 与 `linux/arm64`
-两种架构。镜像中的 SUPPA2 依赖均已固定版本，不依赖云服务器预装 Conda 环境。
+两种架构。镜像中的科学计算依赖和 ASTK 提交均已固定，不依赖云服务器预装 Conda 环境。
 
 生产服务器建议至少 4 GB 内存。1 GB 实例需要额外 swap 并完成真实任务压测。
 
