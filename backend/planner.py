@@ -437,7 +437,7 @@ def prepare_job(job_dir: Path, require_reference: bool = False) -> dict[str, Any
         "input_format": "astk" if native_astk_input else "studio",
         "sample_count": sample_count,
         "p_value": float(config.get("p_value", 0.05)),
-        "abs_dpsi": float(config.get("abs_dpsi", 0.1)),
+        "abs_dpsi": float(config.get("abs_dpsi", 0.0)),
         "method": str(config.get("method", "empirical")),
         "comparisons": plan_comparisons,
         "metadata_json": relative_job_path(job_dir, metadata_json),

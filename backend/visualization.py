@@ -440,7 +440,7 @@ def generate_visualizations(job_dir: Path, plan: dict[str, Any]) -> str:
 
     comparisons = load_comparisons(job_dir, plan)
     p_value = plan_threshold(plan, "p_value", 0.05)
-    abs_dpsi = plan_threshold(plan, "abs_dpsi", 0.1)
+    abs_dpsi = plan_threshold(plan, "abs_dpsi", 0.0)
     significant: dict[tuple[str, str], Path] = {}
     log: list[str] = []
     native_significant = uses_native_astk(plan)

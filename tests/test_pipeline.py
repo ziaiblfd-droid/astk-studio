@@ -184,18 +184,18 @@ class PipelineTests(unittest.TestCase):
             (native / "ref").mkdir(parents=True)
             (native / "psi").mkdir(parents=True)
             (native / "dpsi").mkdir(parents=True)
-            (native / "sig01").mkdir(parents=True)
+            (native / "sig00").mkdir(parents=True)
             (native / "ref" / "annotation_SE_strict.ioe").write_text("event_id\n", encoding="utf-8")
             for suffix in ("c1", "c2"):
                 (native / "psi" / f"g1_SE_{suffix}.psi").write_text("event_id\n", encoding="utf-8")
             (native / "dpsi" / "g1_SE.dpsi").write_text("event_id\tdPSI\tp-value\n", encoding="utf-8")
-            (native / "sig01" / "g1_SE.sig.dpsi").write_text("event_id\tdPSI\tp-value\n", encoding="utf-8")
+            (native / "sig00" / "g1_SE.sig.dpsi").write_text("event_id\tdPSI\tp-value\n", encoding="utf-8")
 
             copied = canonicalize_native_outputs(
                 native,
                 analysis,
                 [{"group": "g1"}],
-                0.1,
+                0.0,
             )
 
             self.assertEqual(copied["events"], 1)

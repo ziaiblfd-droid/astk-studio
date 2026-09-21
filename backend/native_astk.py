@@ -168,7 +168,7 @@ def run_native_astk(
     metadata_path = _write_native_metadata(job_dir, metadata)
     method = str(plan.get("method", "empirical")).lower()
     p_value = float(plan.get("p_value", 0.05))
-    abs_dpsi = float(plan.get("abs_dpsi", 0.1))
+    abs_dpsi = float(plan.get("abs_dpsi", 0.0))
 
     ds_flow(
         str(metadata_path),
