@@ -166,25 +166,30 @@ def read_samples(job_dir: Path) -> list[dict[str, Any]]:
         if missing:
             raise InputError(f"CSV sample table is missing columns: {', '.join(sorted(missing))}")
         rows = []
-        seen_ids: set[str] = set()
+        seen_samples: dict[str, tuple[str, Path, bool]] = {}
         for line_number, row in enumerate(reader, 2):
             sample_id = row["sample_id"].strip()
             condition = row["condition"].strip()
             quant_path = row["quant_path"].strip()
             if not sample_id or not condition or not quant_path:
                 raise InputError(f"CSV sample table line {line_number} has empty required values")
-            if sample_id in seen_ids:
-                raise InputError(f"Duplicate sample_id: {sample_id}")
-            seen_ids.add(sample_id)
             resolved = resolve_quant_path(job_dir, quant_path)
             validate_quant_file(resolved)
             order_text = (row.get("order") or "").strip()
+            baseline = row["baseline"].strip().lower() in TRUTHY
+            signature = (condition, resolved, baseline)
+            previous = seen_samples.get(sample_id)
+            if previous is not None:
+                if previous == signature:
+                    continue
+                raise InputError(f"Conflicting duplicate sample_id: {sample_id}")
+            seen_samples[sample_id] = signature
             rows.append(
                 {
                     "sample_id": sample_id,
                     "condition": condition,
                     "quant_path": resolved,
-                    "baseline": row["baseline"].strip().lower() in TRUTHY,
+                    "baseline": baseline,
                     "order": int(order_text) if order_text else None,
                 }
             )

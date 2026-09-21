@@ -78,6 +78,40 @@ class PipelineTests(unittest.TestCase):
             self.assertIn("SE", plan["command"])
             self.assertIn("FL", plan["command"])
 
+    def test_planner_ignores_exact_duplicate_sample_rows(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            job_dir = self.make_job(Path(temporary))
+            sample_path = job_dir / "input" / "samples.csv"
+            sample_path.write_text(
+                "sample_id,condition,quant_path,baseline,order\n"
+                "e11_r1,E11.5,quant/e11_r1/quant.sf,true,1\n"
+                "e11_r2,E11.5,quant/e11_r2/quant.sf,true,1\n"
+                "e12_r1,E12.5,quant/e12_r1/quant.sf,false,2\n"
+                "e11_r1,E11.5,quant/e11_r1/quant.sf,true,1\n"
+                "e13_r1,E13.5,quant/e13_r1/quant.sf,false,3\n",
+                encoding="utf-8",
+            )
+
+            plan = prepare_job(job_dir)
+
+            self.assertEqual(plan["sample_count"], 4)
+
+    def test_planner_rejects_conflicting_duplicate_sample_rows(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            job_dir = self.make_job(Path(temporary))
+            sample_path = job_dir / "input" / "samples.csv"
+            sample_path.write_text(
+                "sample_id,condition,quant_path,baseline,order\n"
+                "e11_r1,E11.5,quant/e11_r1/quant.sf,true,1\n"
+                "e11_r2,E11.5,quant/e11_r2/quant.sf,true,1\n"
+                "e12_r1,E12.5,quant/e12_r1/quant.sf,false,2\n"
+                "e11_r1,E12.5,quant/e11_r1/quant.sf,false,2\n",
+                encoding="utf-8",
+            )
+
+            with self.assertRaisesRegex(InputError, "Conflicting duplicate sample_id"):
+                prepare_job(job_dir)
+
     def test_suppa_expression_matrix_and_replicate_validation(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
