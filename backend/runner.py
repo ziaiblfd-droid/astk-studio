@@ -108,12 +108,20 @@ def run_job(store: JobStore, job_id: str) -> None:
         store.update(job_id, status="failed", stage="Failed", error=str(exc))
 
 
+def _runner_args(command: str, platform: str | None = None) -> list[str]:
+    platform = platform or os.name
+    args = shlex.split(command, posix=platform != "nt")
+    if platform != "nt" and args and args[0].endswith(".sh"):
+        args.insert(0, "bash")
+    return args
+
+
 def _run_external(store: JobStore, job_id: str, job_dir: Path) -> None:
     template = os.environ["ASTK_RUNNER_COMMAND"]
     command = template.format(job_dir=job_dir, input_dir=job_dir / "input", output_dir=job_dir / "output")
     store.update(job_id, stage="SUPPA2 runner", progress=15)
     process = subprocess.run(
-        shlex.split(command, posix=os.name != "nt"),
+        _runner_args(command),
         cwd=job_dir,
         capture_output=True,
         text=True,

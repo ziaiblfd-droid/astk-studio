@@ -80,7 +80,7 @@ start_backend() {
     export ASTK_HOST="127.0.0.1"
     export ASTK_EXECUTION_MODE="command"
     export ASTK_ENGINE="${ASTK_ENGINE:-auto}"
-    export ASTK_RUNNER_COMMAND="$app_dir/scripts/run-astk-job.sh {job_dir}"
+    export ASTK_RUNNER_COMMAND="bash $app_dir/scripts/run-astk-job.sh {job_dir}"
     export ASTK_MM10_GTF
     export ASTK_TRUST_PROXY="1"
     export ASTK_REQUIRE_EQUAL_REPLICATES="0"

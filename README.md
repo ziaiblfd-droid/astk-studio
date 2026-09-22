@@ -66,7 +66,7 @@ Linux 部署时设置：
 
 ```bash
 export ASTK_EXECUTION_MODE=command
-export ASTK_RUNNER_COMMAND='/opt/astk-studio/scripts/run-astk-job.sh {job_dir}'
+export ASTK_RUNNER_COMMAND='bash /opt/astk-studio/scripts/run-astk-job.sh {job_dir}'
 python3 backend/server.py
 ```
 
@@ -80,7 +80,7 @@ python3 backend/server.py
 
 ```bash
 export ASTK_EXECUTION_MODE=command
-export ASTK_RUNNER_COMMAND='/opt/astk-studio/scripts/run-astk-job.sh {job_dir}'
+export ASTK_RUNNER_COMMAND='bash /opt/astk-studio/scripts/run-astk-job.sh {job_dir}'
 ```
 
 执行完成后，`backend.result_parser` 会把 SUPPA2 的 `psi/`、`dpsi/`、

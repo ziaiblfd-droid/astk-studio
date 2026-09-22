@@ -9,7 +9,7 @@ services:
     environment:
       ASTK_EXECUTION_MODE: command
       ASTK_ENGINE: auto
-      ASTK_RUNNER_COMMAND: /opt/astk-studio/scripts/run-astk-job.sh {job_dir}
+      ASTK_RUNNER_COMMAND: bash /opt/astk-studio/scripts/run-astk-job.sh {job_dir}
       ASTK_WORKERS: 1
       ASTK_JOB_TIMEOUT: 21600
       ASTK_MAX_UPLOAD_BYTES: 536870912

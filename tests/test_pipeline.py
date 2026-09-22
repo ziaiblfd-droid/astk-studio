@@ -15,6 +15,7 @@ from backend.multipart import parse_multipart_stream
 from backend.native_astk import canonicalize_native_outputs
 from backend.planner import InputError, native_comparison_label, prepare_job, safe_extract_zip
 from backend.result_parser import parse_results
+from backend.runner import _runner_args
 from backend.server import resolve_public_file, validate_analysis_files
 from backend.store import JobStore
 from backend.visualization import (
@@ -31,6 +32,16 @@ QUANT = "Name\tLength\tEffectiveLength\tTPM\tNumReads\nTX1\t1000\t800\t12.5\t10\
 
 
 class PipelineTests(unittest.TestCase):
+    def test_shell_runner_uses_bash_when_execute_bit_is_missing(self) -> None:
+        self.assertEqual(
+            _runner_args("/opt/astk/scripts/run-astk-job.sh /tmp/job", platform="posix"),
+            ["bash", "/opt/astk/scripts/run-astk-job.sh", "/tmp/job"],
+        )
+        self.assertEqual(
+            _runner_args("bash /opt/astk/scripts/run-astk-job.sh /tmp/job", platform="posix"),
+            ["bash", "/opt/astk/scripts/run-astk-job.sh", "/tmp/job"],
+        )
+
     def make_job(self, root: Path) -> Path:
         job_dir = root / "ASTK-TEST"
         input_dir = job_dir / "input"
