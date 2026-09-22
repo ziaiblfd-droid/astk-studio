@@ -33,7 +33,8 @@ else:
 
 
 ROOT = Path(__file__).resolve().parent.parent
-STORE = JobStore(ROOT / "data" / "jobs")
+DATA_ROOT = Path(os.getenv("ASTK_DATA_ROOT", str(ROOT / "data"))).resolve()
+STORE = JobStore(DATA_ROOT / "jobs")
 PUBLIC_FILES = {
     "/": ROOT / "index.html",
     "/index.html": ROOT / "index.html",

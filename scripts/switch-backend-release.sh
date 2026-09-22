@@ -76,6 +76,7 @@ start_backend() {
     cd "$app_dir"
     export PATH="$CONDA_BIN:$PATH"
     export ASTK_STUDIO_DIR="$app_dir"
+    export ASTK_DATA_ROOT="${ASTK_DATA_ROOT:-$HOME/astk-web/data}"
     export ASTK_PORT="$PORT"
     export ASTK_HOST="127.0.0.1"
     export ASTK_EXECUTION_MODE="command"
@@ -90,6 +91,7 @@ start_backend() {
     export ASTK_RETENTION_DAYS="7"
     export ASTK_CLEANUP_INTERVAL="3600"
     export PYTHONPATH="$app_dir"
+    mkdir -p "$ASTK_DATA_ROOT/jobs"
     unset ASTK_RECOVER_JOBS
     unset ASTK_RELEASE_DIR
     nohup bash "$app_dir/scripts/run-conda-server.sh" >>"$log_file" 2>&1 &
