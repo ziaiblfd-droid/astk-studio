@@ -11,8 +11,9 @@ WorkingDirectory=/home/yushiye/astk-studio
 Environment=ASTK_HOST=127.0.0.1
 Environment=ASTK_PORT=4173
 Environment=ASTK_EXECUTION_MODE=command
-Environment=ASTK_WORKERS=1
-Environment=ASTK_RETENTION_DAYS=7
+Environment=ASTK_WORKERS=10
+Environment=ASTK_MAX_CONCURRENT_JOBS=10
+Environment=ASTK_RETENTION_DAYS=1
 Environment=ASTK_MAX_UPLOAD_BYTES=536870912
 Environment=ASTK_TRUST_PROXY=1
 ExecStart=/home/yushiye/astk-studio/scripts/run-conda-server.sh

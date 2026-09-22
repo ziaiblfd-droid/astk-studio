@@ -85,10 +85,11 @@ start_backend() {
     export ASTK_MM10_GTF
     export ASTK_TRUST_PROXY="1"
     export ASTK_REQUIRE_EQUAL_REPLICATES="0"
-    export ASTK_WORKERS="1"
+    export ASTK_WORKERS="10"
+    export ASTK_MAX_CONCURRENT_JOBS="10"
     export ASTK_JOB_TIMEOUT="21600"
     export ASTK_MAX_UPLOAD_BYTES="536870912"
-    export ASTK_RETENTION_DAYS="7"
+    export ASTK_RETENTION_DAYS="1"
     export ASTK_CLEANUP_INTERVAL="3600"
     export PYTHONPATH="$app_dir"
     mkdir -p "$ASTK_DATA_ROOT/jobs"

@@ -8,10 +8,20 @@ from typing import Any
 
 
 class JobQueue:
-    def __init__(self, worker: Callable[[str], None], workers: int | None = None) -> None:
+    def __init__(
+        self,
+        worker: Callable[[str], None],
+        workers: int | None = None,
+        max_concurrent_jobs: int | None = None,
+    ) -> None:
         self.worker = worker
-        self.workers = workers or int(os.getenv("ASTK_WORKERS", "1"))
+        configured_workers = workers or int(os.getenv("ASTK_WORKERS", "1"))
+        configured_limit = max_concurrent_jobs or int(os.getenv("ASTK_MAX_CONCURRENT_JOBS", "10"))
+        self.max_concurrent_jobs = max(1, configured_limit)
+        self.workers = min(max(1, configured_workers), self.max_concurrent_jobs)
         self.pending: queue.Queue[str] = queue.Queue()
+        self._active = 0
+        self._active_lock = threading.Lock()
         self._threads: list[threading.Thread] = []
         for index in range(self.workers):
             thread = threading.Thread(target=self._work, name=f"astk-worker-{index + 1}", daemon=True)
@@ -22,14 +32,25 @@ class JobQueue:
         self.pending.put(job_id)
 
     def stats(self) -> dict[str, int]:
-        return {"workers": self.workers, "queued": self.pending.qsize()}
+        with self._active_lock:
+            active = self._active
+        return {
+            "workers": self.workers,
+            "max_concurrent_jobs": self.max_concurrent_jobs,
+            "running": active,
+            "queued": self.pending.qsize(),
+        }
 
     def _work(self) -> None:
         while True:
             job_id = self.pending.get()
+            with self._active_lock:
+                self._active += 1
             try:
                 self.worker(job_id)
             finally:
+                with self._active_lock:
+                    self._active -= 1
                 self.pending.task_done()
 
 
