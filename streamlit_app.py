@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import os
+import re
+from urllib.parse import quote
 
 import streamlit as st
 from streamlit.components.v1 import iframe
@@ -25,6 +27,9 @@ def setting(name: str, default: str | None = None) -> str | None:
 
 
 backend_url = (setting("ASTK_BACKEND_URL", DEFAULT_BACKEND_URL) or DEFAULT_BACKEND_URL).rstrip("/")
+job_id = str(st.query_params.get("job", "")).strip()
+if re.fullmatch(r"ASTK-[A-Za-z0-9-]+", job_id):
+    backend_url = f"{backend_url}/?job={quote(job_id)}"
 
 st.markdown(
     """
