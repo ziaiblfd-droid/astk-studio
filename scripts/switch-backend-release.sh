@@ -10,6 +10,7 @@ ROLLBACK_ON_FAILURE="${ASTK_ROLLBACK_ON_FAILURE:-1}"
 CONDA_BASE="${CONDA_BASE:-$HOME/miniconda3}"
 CONDA_BIN="${ASTK_CONDA_BIN:-$CONDA_BASE/envs/astk/bin}"
 ASTK_MM10_GTF="${ASTK_MM10_GTF:-/home/yushiye/project/gencode.vM25.annotation.gtf}"
+ASTK_MM10_FASTA="${ASTK_MM10_FASTA:-/home/yushiye/project/GRCm38.primary_assembly.genome.fa}"
 
 die() {
   echo "error: $*" >&2
@@ -83,6 +84,7 @@ start_backend() {
     export ASTK_ENGINE="${ASTK_ENGINE:-auto}"
     export ASTK_RUNNER_COMMAND="bash $app_dir/scripts/run-astk-job.sh {job_dir}"
     export ASTK_MM10_GTF
+    export ASTK_MM10_FASTA
     export ASTK_TRUST_PROXY="1"
     export ASTK_REQUIRE_EQUAL_REPLICATES="0"
     export ASTK_WORKERS="10"
