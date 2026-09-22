@@ -114,11 +114,12 @@ def canonicalize_native_outputs(
     comparisons: list[dict[str, str]],
     abs_dpsi: float,
 ) -> dict[str, int]:
-    copied = {"events": 0, "psi": 0, "dpsi": 0, "significant": 0}
+    copied = {"events": 0, "psi": 0, "dpsi": 0, "significant": 0, "significant_psi": 0}
     events_dir = analysis_dir / "events"
     psi_dir = analysis_dir / "psi"
     dpsi_dir = analysis_dir / "dpsi"
     significant_dir = analysis_dir / "sig01" / "dpsi"
+    significant_psi_dir = analysis_dir / "sig01" / "psi"
 
     for kind in EVENT_TYPES:
         source = native_dir / "ref" / f"annotation_{kind}_strict.ioe"
@@ -149,6 +150,15 @@ def canonicalize_native_outputs(
             if sig_source.is_file():
                 _copy(sig_source, significant_dir / f"{group}_{kind}.sig.dpsi")
                 copied["significant"] += 1
+
+            for suffix in ("c1", "c2"):
+                sig_psi_source = native_significant_dir / "psi" / f"{group}_{kind}_{suffix}.sig.psi"
+                if sig_psi_source.is_file():
+                    _copy(
+                        sig_psi_source,
+                        significant_psi_dir / f"{group}_{kind}_{suffix}.sig.psi",
+                    )
+                    copied["significant_psi"] += 1
 
     return copied
 
@@ -208,5 +218,6 @@ def run_native_astk(
         f"ASTK version: {version}",
         f"Native output: {native_dir}",
         f"Copied events: {copied['events']}, psi: {copied['psi']}, "
-        f"dpsi: {copied['dpsi']}, significant: {copied['significant']}",
+        f"dpsi: {copied['dpsi']}, significant: {copied['significant']}, "
+        f"significant psi: {copied['significant_psi']}",
     ]

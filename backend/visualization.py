@@ -3,6 +3,8 @@ from __future__ import annotations
 import csv
 import json
 import math
+import shutil
+import subprocess
 from itertools import combinations
 from pathlib import Path
 from typing import Any
@@ -39,6 +41,30 @@ def plan_threshold(plan: dict[str, Any], key: str, default: float) -> float:
 
 def uses_native_astk(plan: dict[str, Any]) -> bool:
     return "astk" in str(plan.get("engine", "")).lower()
+
+
+def select_upset_comparisons(comparisons: list[dict[str, str]]) -> list[dict[str, str]]:
+    if len(comparisons) <= 3:
+        return comparisons
+    # Keep the established time-course view: earliest contrast plus the two latest.
+    return [comparisons[0], *comparisons[-2:]]
+
+
+def _run_native_plot(command: list[str], job_dir: Path, label: str, log: list[str]) -> bool:
+    process = subprocess.run(
+        command,
+        cwd=job_dir,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if process.returncode == 0:
+        log.append(f"Generated native ASTK {label}")
+        return True
+    detail = (process.stderr or process.stdout or "").strip().splitlines()
+    suffix = f": {detail[-1]}" if detail else ""
+    log.append(f"[warning] native ASTK {label} failed with code {process.returncode}{suffix}")
+    return False
 
 
 def filter_significant_dpsi(
@@ -436,13 +462,205 @@ def plot_upset(path: Path, labels: list[str], sets: list[set[str]]) -> None:
     save_figure(path)
 
 
+def generate_native_visualizations(
+    job_dir: Path,
+    comparisons: list[dict[str, str]],
+) -> str | None:
+    astk = shutil.which("astk")
+    if not astk:
+        return None
+
+    analysis = job_dir / "output" / "analysis"
+    image_root = analysis / "img"
+    log: list[str] = ["Using native ASTK plotting commands"]
+
+    for comparison in comparisons:
+        group = comparison["group"]
+        dpsi_sources = [analysis / "dpsi" / f"{group}_{kind}.dpsi" for kind in EVENT_TYPES]
+        significant_sources = [
+            analysis / "sig01" / "dpsi" / f"{group}_{kind}.sig.dpsi"
+            for kind in EVENT_TYPES
+        ]
+        labels = list(EVENT_TYPES)
+        if all(path.is_file() for path in significant_sources):
+            _run_native_plot(
+                [
+                    astk,
+                    "barplot",
+                    "-i",
+                    *[str(path) for path in significant_sources],
+                    "-o",
+                    str(image_root / "bar" / f"{group}_bar(sig01).png"),
+                    "-dg",
+                    "-xl",
+                    *labels,
+                    "-app",
+                    "SUPPA2",
+                    "-ff",
+                    "png",
+                ],
+                job_dir,
+                f"significant-event bar plot for {group}",
+                log,
+            )
+        if all(path.is_file() for path in dpsi_sources):
+            _run_native_plot(
+                [
+                    astk,
+                    "barplot",
+                    "-i",
+                    *[str(path) for path in dpsi_sources],
+                    "-o",
+                    str(image_root / "bar" / f"{group}_bar(dpsi).png"),
+                    "-dg",
+                    "-xl",
+                    *labels,
+                    "-app",
+                    "SUPPA2",
+                    "-ff",
+                    "png",
+                ],
+                job_dir,
+                f"all-event bar plot for {group}",
+                log,
+            )
+
+    for kind in EVENT_TYPES:
+        psi_sources: list[Path] = []
+        psi_labels: list[str] = []
+        if comparisons:
+            first = comparisons[0]
+            baseline = analysis / "psi" / f"{first['group']}_{kind}_c1.psi"
+            if baseline.is_file():
+                psi_sources.append(baseline)
+                psi_labels.append(first.get("control", "ctrl"))
+            for comparison in comparisons:
+                source = analysis / "psi" / f"{comparison['group']}_{kind}_c2.psi"
+                if source.is_file():
+                    psi_sources.append(source)
+                    psi_labels.append(comparison.get("treatment", "case"))
+        if len(psi_sources) >= 2:
+            _run_native_plot(
+                [
+                    astk,
+                    "pca",
+                    "-i",
+                    *[str(path) for path in psi_sources],
+                    "-o",
+                    str(image_root / "PCA" / f"{kind}.png"),
+                    "-ff",
+                    "png",
+                    "-fw",
+                    "6",
+                    "-fh",
+                    "4",
+                    "-gl",
+                    *psi_labels,
+                    "-gb",
+                    "col",
+                ],
+                job_dir,
+                f"PCA plot for {kind}",
+                log,
+            )
+
+        significant_psi: list[Path] = []
+        if comparisons:
+            first = comparisons[0]
+            baseline = analysis / "sig01" / "psi" / f"{first['group']}_{kind}_c1.sig.psi"
+            if baseline.is_file():
+                significant_psi.append(baseline)
+            significant_psi.extend(
+                source
+                for comparison in comparisons
+                if (
+                    source := analysis
+                    / "sig01"
+                    / "psi"
+                    / f"{comparison['group']}_{kind}_c2.sig.psi"
+                ).is_file()
+            )
+        if len(significant_psi) >= 2:
+            _run_native_plot(
+                [
+                    astk,
+                    "hm",
+                    "-i",
+                    *[str(path) for path in significant_psi],
+                    "-o",
+                    str(image_root / "heatmap" / f"{kind}.png"),
+                    "-ff",
+                    "png",
+                ],
+                job_dir,
+                f"heatmap for {kind}",
+                log,
+            )
+
+        for comparison in comparisons:
+            source = analysis / "dpsi" / f"{comparison['group']}_{kind}.dpsi"
+            if not source.is_file():
+                continue
+            _run_native_plot(
+                [
+                    astk,
+                    "volcano",
+                    "-i",
+                    str(source),
+                    "-o",
+                    str(image_root / "volcano" / f"{comparison['group']}_{kind}.png"),
+                ],
+                job_dir,
+                f"volcano plot for {comparison['group']} / {kind}",
+                log,
+            )
+
+        upset_comparisons = select_upset_comparisons(comparisons)
+        upset_sources = [
+            analysis / "sig01" / "dpsi" / f"{comparison['group']}_{kind}.sig.dpsi"
+            for comparison in upset_comparisons
+        ]
+        if len(upset_sources) >= 2 and all(path.is_file() for path in upset_sources):
+            upset_labels = [
+                f"{comparison.get('control', 'ctrl')}_{comparison.get('treatment', 'case')}"
+                for comparison in upset_comparisons
+            ]
+            _run_native_plot(
+                [
+                    astk,
+                    "upset",
+                    "-i",
+                    *[str(path) for path in upset_sources],
+                    "-o",
+                    str(image_root / "upset" / f"{kind}.png"),
+                    "-xl",
+                    *upset_labels,
+                    "-dg",
+                    "-fmt",
+                    "png",
+                ],
+                job_dir,
+                f"UpSet plot for {kind}",
+                log,
+            )
+
+    return "\n".join(log)
+
+
 def generate_visualizations(job_dir: Path, plan: dict[str, Any]) -> str:
     analysis = job_dir / "output" / "analysis"
     image_root = analysis / "img"
     for name in ("bar", "PCA", "heatmap", "volcano", "upset"):
-        (image_root / name).mkdir(parents=True, exist_ok=True)
+        directory = image_root / name
+        if directory.exists():
+            shutil.rmtree(directory)
+        directory.mkdir(parents=True, exist_ok=True)
 
     comparisons = load_comparisons(job_dir, plan)
+    if uses_native_astk(plan):
+        native_log = generate_native_visualizations(job_dir, comparisons)
+        if native_log is not None:
+            return native_log
     p_value = plan_threshold(plan, "p_value", 0.05)
     abs_dpsi = plan_threshold(plan, "abs_dpsi", 0.0)
     significant: dict[tuple[str, str], Path] = {}

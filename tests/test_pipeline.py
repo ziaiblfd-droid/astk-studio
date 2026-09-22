@@ -25,6 +25,7 @@ from backend.visualization import (
     load_comparisons,
     plot_volcano,
     prepare_heatmap_inputs,
+    select_upset_comparisons,
 )
 
 
@@ -231,10 +232,14 @@ class PipelineTests(unittest.TestCase):
             (native / "ref").mkdir(parents=True)
             (native / "psi").mkdir(parents=True)
             (native / "dpsi").mkdir(parents=True)
-            (native / "sig00").mkdir(parents=True)
+            (native / "sig00" / "psi").mkdir(parents=True)
             (native / "ref" / "annotation_SE_strict.ioe").write_text("event_id\n", encoding="utf-8")
             for suffix in ("c1", "c2"):
                 (native / "psi" / f"g1_SE_{suffix}.psi").write_text("event_id\n", encoding="utf-8")
+                (native / "sig00" / "psi" / f"g1_SE_{suffix}.sig.psi").write_text(
+                    "event_id\n",
+                    encoding="utf-8",
+                )
             (native / "dpsi" / "g1_SE.dpsi").write_text("event_id\tdPSI\tp-value\n", encoding="utf-8")
             (native / "sig00" / "g1_SE.sig.dpsi").write_text("event_id\tdPSI\tp-value\n", encoding="utf-8")
 
@@ -249,7 +254,14 @@ class PipelineTests(unittest.TestCase):
             self.assertEqual(copied["psi"], 2)
             self.assertEqual(copied["dpsi"], 1)
             self.assertEqual(copied["significant"], 1)
+            self.assertEqual(copied["significant_psi"], 2)
             self.assertTrue((analysis / "sig01" / "dpsi" / "g1_SE.sig.dpsi").is_file())
+            self.assertTrue((analysis / "sig01" / "psi" / "g1_SE_c1.sig.psi").is_file())
+
+    def test_upset_uses_first_and_last_two_timepoint_comparisons(self) -> None:
+        comparisons = [{"group": f"g{index}"} for index in range(1, 5)]
+        selected = select_upset_comparisons(comparisons)
+        self.assertEqual([item["group"] for item in selected], ["g1", "g3", "g4"])
 
     def test_significant_dpsi_filter_uses_astk_strict_thresholds(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

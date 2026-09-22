@@ -71,8 +71,8 @@
                 <label class="field"><span>物种</span><div class="select-wrap"><select id="species"><option>Mus musculus · mm10</option><option>Homo sapiens · hg38</option></select><i data-lucide="chevron-down"></i></div></label>
                 <label class="field"><span>实验设计</span><div class="select-wrap"><select id="design"><option>多时间点发育序列</option><option>两组比较</option><option>多组比较</option></select><i data-lucide="chevron-down"></i></div></label>
                 <label class="field"><span>参考注释</span><div class="select-wrap"><select><option>Gencode M25 · GTF</option><option>Gencode v44 · GTF</option><option>自定义注释文件</option></select><i data-lucide="chevron-down"></i></div></label>
-                <label class="field"><span>显著性阈值</span><div class="input-suffix"><input value="0.05" aria-label="p value threshold" /><span>p-value</span></div></label>
-                <label class="field"><span>最小变化幅度</span><div class="input-suffix"><input value="0" aria-label="absolute dpsi threshold" /><span>|dPSI|</span></div></label>
+                <label class="field"><span>显著性阈值</span><div class="input-suffix"><input type="number" min="0" max="1" step="0.01" value="0.05" aria-label="p value threshold" /><span>p-value</span></div></label>
+                <label class="field"><span>最小变化幅度</span><div class="input-suffix"><input type="number" min="0" max="1" step="0.01" value="0" aria-label="absolute dpsi threshold" /><span>|dPSI|</span></div></label>
               </div>
               <div class="upload-zone" id="upload-zone" tabindex="0">
                 <div class="upload-icon"><i data-lucide="upload-cloud"></i></div><div><strong>拖入 quant.zip 与 CSV 样本表</strong><span>CSV 文件名无需修改 · ZIP 内保留每个样本的 quant.sf 目录 · 单次最大 512 MB</span></div><button class="button mini" id="browse-files">选择文件</button><input type="file" id="file-input" multiple hidden accept=".zip,.csv" />
