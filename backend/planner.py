@@ -20,10 +20,12 @@ DEFAULT_REFERENCES = {
     "Mus musculus · mm10": {
         "id": "mm10-gencode-m25",
         "gtf": "/refs/mm10/gencode.vM25.annotation.gtf",
+        "fasta": "/refs/mm10/GRCm38.primary_assembly.genome.fa",
     },
     "Homo sapiens · hg38": {
         "id": "hg38-gencode-v44",
         "gtf": "/refs/hg38/gencode.v44.annotation.gtf",
+        "fasta": "/refs/hg38/GRCh38.primary_assembly.genome.fa",
     },
 }
 
@@ -69,6 +71,10 @@ def load_references() -> dict[str, dict[str, str]]:
         references["Mus musculus · mm10"]["gtf"] = mm10_gtf
     if hg38_gtf := os.getenv("ASTK_HG38_GTF"):
         references["Homo sapiens · hg38"]["gtf"] = hg38_gtf
+    if mm10_fasta := os.getenv("ASTK_MM10_FASTA"):
+        references["Mus musculus · mm10"]["fasta"] = mm10_fasta
+    if hg38_fasta := os.getenv("ASTK_HG38_FASTA"):
+        references["Homo sapiens · hg38"]["fasta"] = hg38_fasta
     for species, (species_dir, filename) in REFERENCE_FILES.items():
         configured = references.get(species, {}).get("gtf", "")
         if configured and Path(configured).exists():
@@ -423,6 +429,18 @@ def prepare_job(job_dir: Path, require_reference: bool = False) -> dict[str, Any
     gtf = Path(reference["gtf"])
     if require_reference and not gtf.exists():
         raise InputError(f"Reference GTF does not exist: {gtf}")
+    sequence_features = bool(config.get("sequence_features", False))
+    fasta_value = str(reference.get("fasta", "")).strip()
+    if sequence_features and not fasta_value:
+        raise InputError(
+            f"Sequence feature analysis requires a FASTA reference for {species}; "
+            "configure ASTK_MM10_FASTA or ASTK_HG38_FASTA"
+        )
+    if sequence_features and not Path(fasta_value).exists():
+        raise InputError(
+            f"Sequence feature FASTA does not exist: {fasta_value}. "
+            "Configure ASTK_MM10_FASTA or ASTK_HG38_FASTA on the server."
+        )
     output_dir = job_dir / "output" / "analysis"
     suppa_command = os.getenv("SUPPA_COMMAND", str(SUPPA_ROOT / "eventGenerator.py"))
     command = [
@@ -444,6 +462,7 @@ def prepare_job(job_dir: Path, require_reference: bool = False) -> dict[str, Any
         "p_value": float(config.get("p_value", 0.05)),
         "abs_dpsi": float(config.get("abs_dpsi", 0.0)),
         "method": str(config.get("method", "empirical")),
+        "sequence_features": sequence_features,
         "comparisons": plan_comparisons,
         "metadata_json": relative_job_path(job_dir, metadata_json),
         "metadata_csv": relative_job_path(job_dir, metadata_csv),

@@ -13,6 +13,7 @@ from typing import Any
 from .planner import InputError, prepare_job
 from .native_astk import run_native_astk, select_engine
 from .result_parser import parse_results
+from .sequence_features import run_sequence_features
 from .visualization import generate_visualizations
 
 
@@ -238,6 +239,9 @@ def execute(job_dir: Path) -> None:
     if plot_log:
         runner.lines.append(plot_log)
         log_path.write_text("\n".join(runner.lines) + "\n", encoding="utf-8")
+    if plan.get("sequence_features"):
+        runner.append("=== SEQUENCE FEATURE ANALYSIS ===", log_path)
+        run_sequence_features(job_dir, plan, log_path)
     parse_results(job_dir, Path(plan["reference"]["gtf"]))
 
 

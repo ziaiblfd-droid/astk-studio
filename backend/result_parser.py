@@ -155,6 +155,19 @@ def load_comparisons(job_dir: Path, plan: dict[str, Any]) -> list[dict[str, str]
     return comparisons
 
 
+def load_sequence_features(job_dir: Path) -> dict[str, Any]:
+    path = job_dir / "output" / "sequence_features" / "summary.json"
+    if not path.exists():
+        return {"enabled": False, "groups": []}
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return {"enabled": True, "groups": [], "error": "Invalid sequence feature summary"}
+    if not isinstance(payload, dict):
+        return {"enabled": True, "groups": [], "error": "Invalid sequence feature summary"}
+    return payload
+
+
 def parse_results(job_dir: Path, gtf_path: Path | None = None, preview_limit: int = 5000) -> dict[str, Any]:
     analysis_dir = job_dir / "output" / "analysis"
     plan = load_plan(job_dir)
@@ -215,6 +228,7 @@ def parse_results(job_dir: Path, gtf_path: Path | None = None, preview_limit: in
         "reference": plan.get("reference", {}),
         "engine": plan.get("engine", "suppa2"),
         "mode": plan.get("engine", "suppa2"),
+        "sequence_features": load_sequence_features(job_dir),
     }
     output = job_dir / "output" / "results.json"
     output.write_text(json.dumps(results, ensure_ascii=False, indent=2), encoding="utf-8")
