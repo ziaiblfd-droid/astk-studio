@@ -6,7 +6,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 DIST = ROOT / "dist"
-FILES = ("index.html", "styles.css", "responsive.css", "github-pages.css", "app.js")
+FILES = ("index.html", "styles.css", "responsive.css", "github-pages.css", "sample-groups.css", "results.css", "app.js")
 DIRECTORIES = ("templates",)
 
 

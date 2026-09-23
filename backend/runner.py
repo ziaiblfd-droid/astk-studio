@@ -99,8 +99,8 @@ def run_job(store: JobStore, job_id: str) -> None:
                 time.sleep(0.32)
                 completed.append({"name": name, "status": "complete"})
             _write_results(job_dir, job["config"])
-        store.update(job_id, status="completed", stage="Completed", progress=100, stages=completed)
         _build_archive(job_dir)
+        store.update(job_id, status="completed", stage="Completed", progress=100, stages=completed)
     except Exception as exc:
         log_path = job_dir / "output" / "runner.log"
         with log_path.open("a", encoding="utf-8") as handle:

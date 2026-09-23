@@ -13,7 +13,8 @@
     <link rel="stylesheet" href="responsive.css?v=20260918" />
     <link rel="stylesheet" href="github-pages.css?v=20260918" />
     <link rel="stylesheet" href="sample-groups.css?v=20260921" />
-    <script src="app.js?v=20260921c" defer></script>
+    <link rel="stylesheet" href="results.css?v=20260923" />
+    <script src="app.js?v=20260923" defer></script>
   </head>
   <body>
     <div class="app-shell">
@@ -38,7 +39,7 @@
         <div class="workspace-label">RESOURCES</div>
         <nav class="nav-list">
           <a class="nav-item" href="https://huang-sh.github.io/astk-doc/#/zh-cn/content/seq_feature" target="_blank" rel="noreferrer"><i data-lucide="book-open"></i><span>ASTK 方法说明</span><i data-lucide="arrow-up-right" class="external-icon"></i></a>
-          <a class="nav-item" href="#downloads"><i data-lucide="download"></i><span>结果与下载</span></a>
+          <a class="nav-item" href="#downloads" id="sidebar-download"><i data-lucide="download"></i><span>结果与下载</span></a>
         </nav>
 
         <div class="sidebar-bottom">
@@ -73,6 +74,7 @@
                 <label class="field"><span>参考注释</span><div class="select-wrap"><select><option>Gencode M25 · GTF</option><option>Gencode v44 · GTF</option><option>自定义注释文件</option></select><i data-lucide="chevron-down"></i></div></label>
                 <label class="field"><span>显著性阈值</span><div class="input-suffix"><input type="number" min="0" max="1" step="0.01" value="0.05" aria-label="p value threshold" /><span>p-value</span></div></label>
                 <label class="field"><span>最小变化幅度</span><div class="input-suffix"><input type="number" min="0" max="1" step="0.01" value="0" aria-label="absolute dpsi threshold" /><span>|dPSI|</span></div></label>
+                <label class="field full"><span>高低 PSI 定义</span><div class="psi-threshold-grid"><div class="input-suffix"><input type="number" min="0" max="1" step="0.01" value="0.8" aria-label="high psi threshold" /><span>High ≥</span></div><div class="input-suffix"><input type="number" min="0" max="1" step="0.01" value="0.2" aria-label="low psi threshold" /><span>Low ≤</span></div></div><small class="field-help">只影响序列特征模块的 High / Low 事件筛选。</small></label>
               </div>
               <div class="upload-zone" id="upload-zone" tabindex="0">
                 <div class="upload-icon"><i data-lucide="upload-cloud"></i></div><div><strong>拖入 quant.zip 与 CSV 样本表</strong><span>CSV 文件名无需修改 · ZIP 内保留每个样本的 quant.sf 目录 · 单次最大 512 MB</span></div><button class="button mini" id="browse-files">选择文件</button><input type="file" id="file-input" multiple hidden accept=".zip,.csv" />
@@ -113,9 +115,17 @@
           <div class="charts-grid lower"><section class="panel chart-panel"><div class="chart-header"><div><h3>PSI 样本结构</h3><span>Principal component analysis</span></div><button class="more-button" title="放大图表" data-zoom-target="#pca-chart"><i data-lucide="maximize-2"></i></button></div><div class="scatter-chart" id="pca-chart"></div><div class="scatter-legend"><span><i class="legend-dot blue"></i>Early</span><span><i class="legend-dot yellow"></i>Mid</span><span><i class="legend-dot coral"></i>Late</span></div></section><section class="panel chart-panel wide"><div class="chart-header"><div><h3>显著事件热图</h3><span>Top 60 events · normalized PSI</span></div><div class="chart-actions"><select id="heatmap-type" aria-label="热图事件类型"><option value="SE">SE</option><option value="AF">AF</option><option value="A3">A3</option><option value="A5">A5</option><option value="AL">AL</option><option value="MX">MX</option><option value="RI">RI</option></select><button class="more-button" title="放大图表" data-zoom-target="#heatmap"><i data-lucide="maximize-2"></i></button></div></div><div class="heatmap" id="heatmap"></div><div class="heatmap-labels"><span>Low PSI</span><span>High PSI</span></div></section></div>
           <section class="panel volcano-panel"><div class="chart-header"><div><h3>差异可变剪切</h3><span>ΔPSI vs statistical significance</span></div><div class="volcano-summary"><span><i class="legend-dot coral"></i>Up 903</span><span><i class="legend-dot blue"></i>Down 921</span><button class="button mini secondary" id="show-all-events">查看全部事件</button></div></div><div class="volcano-chart" id="volcano-chart"></div></section>
           <div class="section-heading supplemental-heading" id="supplemental-heading" hidden><div><div class="eyebrow">04 / SUPPLEMENTARY</div><h2>比较组补充图表</h2></div></div>
-          <div class="supplemental-grid" id="supplemental-charts" hidden></div>
+          <section class="panel figure-browser" id="supplemental-charts" hidden></section>
           <div class="section-heading sequence-heading" id="sequence-heading" hidden><div><div class="eyebrow">05 / SEQUENCE FEATURES</div><h2>序列特征分析</h2></div></div>
           <section class="panel sequence-panel" id="sequence-features-results" hidden></section>
+          <section class="downloads-section" id="downloads">
+            <div class="section-heading"><div><div class="eyebrow">06 / EXPORT</div><h2>结果与下载</h2></div></div>
+            <p id="downloads-status">完成真实分析后，可下载完整报告和结果 JSON。</p>
+            <div class="download-actions">
+              <a class="button secondary" id="download-zip" aria-disabled="true"><i data-lucide="file-archive"></i>完整报告 ZIP</a>
+              <a class="button secondary" id="download-json" download="astk-results.json" aria-disabled="true"><i data-lucide="file-json"></i>结果 JSON</a>
+            </div>
+          </section>
         </section>
 
         <section class="page-view" id="events-view"><div class="page-heading compact"><div><div class="eyebrow">EVENT EXPLORER</div><h1>事件浏览器</h1><p>在所有可变剪切事件中定位值得关注的基因与调控模式。</p></div><button class="button primary" id="export-events"><i data-lucide="download"></i>导出当前结果</button></div><section class="panel event-browser"><div class="event-toolbar"><div class="event-tabs" id="event-tabs"></div><div class="table-tools"><div class="search-field"><i data-lucide="search"></i><input id="event-search" placeholder="搜索 gene / event ID" /></div><select id="event-filter"><option value="all">全部显著性</option><option value="up">dPSI 上升</option><option value="down">dPSI 下降</option></select></div></div><div class="table-wrap"><table><thead><tr><th>Event ID</th><th>Gene</th><th>Type</th><th>Condition</th><th>PSI</th><th>ΔPSI</th><th>p-value</th><th></th></tr></thead><tbody id="events-table"></tbody></table></div><div class="table-footer"><span id="event-count">Showing 8 of 1,824 significant events</span><div class="pagination"><button class="page-button active">1</button><button class="page-button">2</button><button class="page-button">3</button><span>...</span><button class="page-button">Next <i data-lucide="chevron-right"></i></button></div></div></section></section>

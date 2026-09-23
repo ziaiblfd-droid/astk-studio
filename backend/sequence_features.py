@@ -4,6 +4,7 @@ import csv
 import json
 import math
 import os
+import re
 import shlex
 import subprocess
 from pathlib import Path
@@ -12,6 +13,7 @@ from typing import Any
 
 FEATURES = ("splice_score", "gc", "element_length")
 STRATA = ("high", "low")
+GC_REGION = re.compile(r"^(A\d+_[35]SS)_(exon|intron)_")
 
 
 def _command() -> list[str]:
@@ -56,7 +58,13 @@ def _is_number(value: str) -> bool:
         return False
 
 
-def _filter_psi(source_paths: list[Path], event_ids: set[str], destination: Path, high: bool) -> int:
+def _filter_psi(
+    source_paths: list[Path],
+    event_ids: set[str],
+    destination: Path,
+    high: bool,
+    threshold: float | None = None,
+) -> int:
     tables = [_read_table(path) for path in source_paths if path.exists()]
     if not tables:
         return 0
@@ -78,7 +86,8 @@ def _filter_psi(source_paths: list[Path], event_ids: set[str], destination: Path
         numeric = [float(value) for value in values if _is_number(value)]
         if not numeric or len(numeric) != len(values):
             continue
-        if (min(numeric) >= 0.8) if high else (max(numeric) <= 0.2):
+        cutoff = threshold if threshold is not None else (0.8 if high else 0.2)
+        if (min(numeric) >= cutoff) if high else (max(numeric) <= cutoff):
             selected.append([event_id, *values])
     if not selected:
         return 0
@@ -137,6 +146,90 @@ def _run_feature(
     return files
 
 
+def _gc_region_means(source: Path, destination: Path) -> None:
+    with source.open("r", encoding="utf-8-sig", newline="") as handle:
+        reader = csv.DictReader(handle)
+        columns: dict[str, list[str]] = {}
+        for name in reader.fieldnames or []:
+            match = GC_REGION.match(name)
+            if match:
+                columns.setdefault(f"{match[1]}_{match[2]}", []).append(name)
+        if not columns:
+            raise ValueError(f"No splice-site GC regions in {source}")
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        with destination.open("w", encoding="utf-8", newline="") as output:
+            writer = csv.writer(output)
+            writer.writerow(["event_id", *columns])
+            for row in reader:
+                values = []
+                for names in columns.values():
+                    numeric = [float(row[name]) for name in names if _is_number(row.get(name, ""))]
+                    values.append(sum(numeric) / len(numeric) if numeric else "")
+                writer.writerow([row.get("event_id", ""), *values])
+
+
+def _compare_features(
+    job_dir: Path,
+    output_root: Path,
+    group: str,
+    kind: str,
+    high: dict[str, Any],
+    low: dict[str, Any],
+    log: list[str],
+) -> list[dict[str, Any]]:
+    comparisons: list[dict[str, Any]] = []
+    if not high["selected_events"] or not low["selected_events"]:
+        return comparisons
+    for feature, filename in (("splice_score", "splice_scores.csv"), ("gc", "gcc.csv"), ("element_length", "element_len.csv")):
+        destination = output_root / "comparisons" / f"{group}_{kind}"
+        destination.mkdir(parents=True, exist_ok=True)
+        figure = destination / f"{feature}_high_vs_low.png"
+        statistics = destination / f"{feature}_high_vs_low.txt"
+        item: dict[str, Any] = {
+            "group": group, "kind": kind, "feature": feature,
+            "high_events": high["selected_events"], "low_events": low["selected_events"],
+            "status": "completed",
+        }
+        try:
+            source_dir = output_root / feature
+            sources = [source_dir / f"{group}_{kind}_{stratum}" / filename for stratum in STRATA]
+            if not all(source.is_file() for source in sources):
+                raise FileNotFoundError(f"Missing {feature} high/low feature table")
+            if feature == "gc":
+                normalized = []
+                for stratum, source in zip(STRATA, sources):
+                    summary = destination / f"gc_regions_{stratum}.csv"
+                    _gc_region_means(source, summary)
+                    normalized.append(summary)
+                sources = normalized
+            command = [
+                *_command(), "vcmp", "-e", *(str(source) for source in sources),
+                "-gn", "High", "Low", "-o", str(figure), "-ff", "png",
+                "-test", "Mann-Whitney", "-mc", "BH", "-ft", "box",
+            ]
+            log.append("$ " + shlex.join(command))
+            process = subprocess.run(
+                command, cwd=job_dir, capture_output=True, text=True,
+                timeout=int(os.getenv("ASTK_FEATURE_TIMEOUT", "7200")), check=False,
+            )
+            statistics.write_text(
+                "\n".join(part for part in (process.stdout, process.stderr) if part),
+                encoding="utf-8",
+            )
+            if process.returncode or not figure.is_file():
+                raise RuntimeError(f"ASTK vcmp exited with code {process.returncode}; see {statistics.name}")
+            item["image"] = figure.relative_to(job_dir).as_posix()
+            item["statistics"] = statistics.relative_to(job_dir).as_posix()
+            if feature == "gc":
+                item["method"] = "Mean GC per splice-site exon/intron region"
+        except (OSError, subprocess.TimeoutExpired, RuntimeError, ValueError) as error:
+            item["status"] = "failed"
+            item["error"] = str(error)
+            log.append(f"{group}/{kind}/{feature} comparison failed: {error}")
+        comparisons.append(item)
+    return comparisons
+
+
 def run_sequence_features(job_dir: Path, plan: dict[str, Any], log_path: Path) -> dict[str, Any]:
     output_root = job_dir / "output" / "sequence_features"
     psi_root = output_root / "psi"
@@ -151,7 +244,10 @@ def run_sequence_features(job_dir: Path, plan: dict[str, Any], log_path: Path) -
         raise RuntimeError(f"Sequence feature FASTA does not exist: {fasta}")
 
     log: list[str] = ["=== SEQUENCE FEATURES ===", f"FASTA: {fasta}"]
+    high_threshold = float(plan.get("psi_high_threshold", 0.8))
+    low_threshold = float(plan.get("psi_low_threshold", 0.2))
     groups: list[dict[str, Any]] = []
+    feature_comparisons: list[dict[str, Any]] = []
     comparisons = plan.get("comparisons", [])
     for comparison in comparisons:
         group = str(comparison.get("group", ""))
@@ -161,13 +257,20 @@ def run_sequence_features(job_dir: Path, plan: dict[str, Any], log_path: Path) -
             event_ids = _significant_ids(analysis_dir, group, kind)
             if not event_ids:
                 continue
+            strata: dict[str, dict[str, Any]] = {}
             source_paths = [
                 analysis_dir / "psi" / f"{group}_{kind}_c1.psi",
                 analysis_dir / "psi" / f"{group}_{kind}_c2.psi",
             ]
             for stratum, high in (("high", True), ("low", False)):
                 psi_path = psi_root / f"{group}_{kind}_{stratum}.psi"
-                selected = _filter_psi(source_paths, event_ids, psi_path, high)
+                selected = _filter_psi(
+                    source_paths,
+                    event_ids,
+                    psi_path,
+                    high,
+                    high_threshold if high else low_threshold,
+                )
                 item: dict[str, Any] = {
                     "group": group,
                     "kind": kind,
@@ -187,14 +290,22 @@ def run_sequence_features(job_dir: Path, plan: dict[str, Any], log_path: Path) -
                             item.setdefault("errors", {})[feature] = str(error)
                             log.append(f"{feature} failed for {group}/{kind}/{stratum}: {error}")
                 groups.append(item)
+                strata[stratum] = item
+            feature_comparisons.extend(
+                _compare_features(job_dir, output_root, group, kind, strata["high"], strata["low"], log)
+            )
 
     summary = {
         "enabled": True,
         "fasta": str(fasta),
+        "high_threshold": high_threshold,
+        "low_threshold": low_threshold,
         "groups": groups,
+        "comparisons": feature_comparisons,
         "completed": sum(item["status"] == "completed" for item in groups),
         "selected_events": sum(int(item["selected_events"]) for item in groups),
-        "failed": sum(item["status"] == "failed" for item in groups),
+        "failed": sum(item["status"] == "failed" for item in groups)
+        + sum(item["status"] == "failed" for item in feature_comparisons),
     }
     (output_root / "summary.json").write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
     log_path.parent.mkdir(parents=True, exist_ok=True)

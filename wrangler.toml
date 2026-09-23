@@ -7,5 +7,5 @@ workers_dev = true
 ASTK_BACKEND_URL = "https://api.astkstudio.dpdns.org"
 
 [assets]
-directory = "."
+directory = "dist"
 binding = "ASSETS"

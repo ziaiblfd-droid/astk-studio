@@ -7,6 +7,7 @@ import unittest
 import zipfile
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from unittest.mock import patch
 
 from backend.cleanup import cleanup_expired_jobs
 from backend.execute_suppa import read_tpm, validate_group, write_expression_matrix
@@ -15,7 +16,8 @@ from backend.multipart import parse_multipart_stream
 from backend.native_astk import canonicalize_native_outputs
 from backend.planner import InputError, native_comparison_label, prepare_job, safe_extract_zip
 from backend.result_parser import parse_results, read_event_ids
-from backend.runner import _runner_args
+from backend.runner import _runner_args, run_job
+from backend.sequence_features import _compare_features, _filter_psi, _gc_region_means
 from backend.server import resolve_public_file, validate_analysis_files
 from backend.upload_store import UploadError, UploadStore
 from backend.store import JobStore
@@ -34,6 +36,89 @@ QUANT = "Name\tLength\tEffectiveLength\tTPM\tNumReads\nTX1\t1000\t800\t12.5\t10\
 
 
 class PipelineTests(unittest.TestCase):
+    def test_sequence_filter_requires_consistent_psi_across_conditions(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            controls = root / "control.psi"
+            cases = root / "case.psi"
+            controls.write_text("event_id\tctrl\nstable-high\t0.9\nswitch\t0.1\n", encoding="utf-8")
+            cases.write_text("event_id\tcase\nstable-high\t0.9\nswitch\t0.9\n", encoding="utf-8")
+            selected = _filter_psi([controls, cases], {"stable-high", "switch"}, root / "high.psi", True)
+            self.assertEqual(selected, 1)
+            self.assertIn("stable-high", (root / "high.psi").read_text(encoding="utf-8"))
+            self.assertNotIn("switch", (root / "high.psi").read_text(encoding="utf-8"))
+
+    def test_sequence_filter_uses_custom_thresholds(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = root / "psi.tsv"
+            source.write_text("event_id\tsample\nhigh\t0.76\nlow\t0.24\n", encoding="utf-8")
+            self.assertEqual(
+                _filter_psi([source], {"high", "low"}, root / "high.tsv", True, 0.75),
+                1,
+            )
+            self.assertEqual(
+                _filter_psi([source], {"high", "low"}, root / "low.tsv", False, 0.25),
+                1,
+            )
+
+    def test_gc_region_means_preserves_per_event_values(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = root / "gcc.csv"
+            source.write_text(
+                "event_id,A1_5SS_exon_b-1,A1_5SS_exon_b-2,A1_5SS_intron_b-1\n"
+                "e1,0.2,0.6,0.8\n", encoding="utf-8"
+            )
+            destination = root / "means.csv"
+            _gc_region_means(source, destination)
+            self.assertEqual(
+                destination.read_text(encoding="utf-8").splitlines(),
+                ["event_id,A1_5SS_exon,A1_5SS_intron", "e1,0.4,0.8"],
+            )
+
+    def test_sequence_comparisons_use_vcmp_and_report_missing_inputs(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            output = root / "output" / "sequence_features"
+            for stratum in ("high", "low"):
+                source = output / "splice_score" / f"g1_SE_{stratum}" / "splice_scores.csv"
+                source.parent.mkdir(parents=True)
+                source.write_text("event_id,A1_5SS\ne1,1\n", encoding="utf-8")
+            def fake_run(command, **kwargs):
+                Path(command[command.index("-o") + 1]).write_bytes(b"png")
+                return type("Result", (), {"returncode": 0, "stdout": "test result", "stderr": ""})()
+            with patch("backend.sequence_features.subprocess.run", side_effect=fake_run) as run:
+                items = _compare_features(
+                    root, output, "g1", "SE", {"selected_events": 2},
+                    {"selected_events": 3}, [],
+                )
+            self.assertEqual(items[0]["status"], "completed")
+            self.assertTrue(items[0]["image"].endswith("splice_score_high_vs_low.png"))
+            self.assertEqual(items[1]["status"], "failed")
+            self.assertEqual(items[2]["status"], "failed")
+            self.assertIn("vcmp", run.call_args.args[0])
+            self.assertEqual(
+                _compare_features(root, output, "g1", "SE", {"selected_events": 0}, {"selected_events": 3}, []),
+                [],
+            )
+
+    def test_report_archive_is_built_before_completed_state_is_published(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            store = JobStore(Path(temporary))
+            store.create("ASTK-REPORT", {"demo": True})
+            with patch("backend.runner.time.sleep", return_value=None):
+                run_job(store, "ASTK-REPORT")
+            job = store.read("ASTK-REPORT")
+            self.assertEqual(job["status"], "completed")
+            self.assertTrue((store.job_dir("ASTK-REPORT") / "astk-report.zip").is_file())
+            observed = []
+            def inspect_archive(job_dir: Path) -> None:
+                observed.append(store.read("ASTK-REPORT")["status"])
+            with patch("backend.runner._build_archive", side_effect=inspect_archive):
+                run_job(store, "ASTK-REPORT")
+            self.assertEqual(observed, ["running"])
+
     def test_shell_runner_uses_bash_when_execute_bit_is_missing(self) -> None:
         self.assertEqual(
             _runner_args("/opt/astk/scripts/run-astk-job.sh /tmp/job", platform="posix"),
@@ -92,6 +177,21 @@ class PipelineTests(unittest.TestCase):
             self.assertTrue(plan["command"][1].endswith("eventGenerator.py"))
             self.assertIn("SE", plan["command"])
             self.assertIn("FL", plan["command"])
+
+    def test_planner_validates_and_records_psi_thresholds(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            job_dir = self.make_job(Path(temporary))
+            job = json.loads((job_dir / "job.json").read_text(encoding="utf-8"))
+            job["config"]["psi_high_threshold"] = 0.75
+            job["config"]["psi_low_threshold"] = 0.25
+            (job_dir / "job.json").write_text(json.dumps(job), encoding="utf-8")
+            plan = prepare_job(job_dir)
+            self.assertEqual(plan["psi_high_threshold"], 0.75)
+            self.assertEqual(plan["psi_low_threshold"], 0.25)
+            job["config"]["psi_low_threshold"] = 0.8
+            (job_dir / "job.json").write_text(json.dumps(job), encoding="utf-8")
+            with self.assertRaises(InputError):
+                prepare_job(job_dir)
 
     def test_planner_ignores_exact_duplicate_sample_rows(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

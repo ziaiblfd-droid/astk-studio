@@ -45,6 +45,7 @@ PUBLIC_FILES = {
     "/responsive.css": ROOT / "responsive.css",
     "/github-pages.css": ROOT / "github-pages.css",
     "/sample-groups.css": ROOT / "sample-groups.css",
+    "/results.css": ROOT / "results.css",
     "/templates/samples.csv": ROOT / "templates" / "samples.csv",
 }
 MAX_UPLOAD_BYTES = int(os.getenv("ASTK_MAX_UPLOAD_BYTES", str(512 * 1024 * 1024)))
