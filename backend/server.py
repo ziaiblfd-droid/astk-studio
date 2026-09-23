@@ -24,12 +24,14 @@ if __package__ in (None, ""):
     from backend.multipart import MultipartError, parse_multipart_stream
     from backend.runner import run_job
     from backend.store import JobStore
+    from backend.upload_store import UploadError, UploadStore
 else:
     from .cleanup import cleanup_expired_jobs
     from .job_queue import JobQueue, recover_pending_jobs
     from .multipart import MultipartError, parse_multipart_stream
     from .runner import run_job
     from .store import JobStore
+    from .upload_store import UploadError, UploadStore
 
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -46,10 +48,20 @@ PUBLIC_FILES = {
     "/templates/samples.csv": ROOT / "templates" / "samples.csv",
 }
 MAX_UPLOAD_BYTES = int(os.getenv("ASTK_MAX_UPLOAD_BYTES", str(512 * 1024 * 1024)))
+UPLOAD_CHUNK_BYTES = int(os.getenv("ASTK_UPLOAD_CHUNK_BYTES", str(1024 * 1024)))
+UPLOAD_RETENTION_SECONDS = int(os.getenv("ASTK_UPLOAD_RETENTION_SECONDS", "86400"))
+MAX_UPLOAD_SESSIONS = int(os.getenv("ASTK_MAX_UPLOAD_SESSIONS", "20"))
 RETENTION_DAYS = float(os.getenv("ASTK_RETENTION_DAYS", "7"))
 CLEANUP_INTERVAL = max(60, int(os.getenv("ASTK_CLEANUP_INTERVAL", "3600")))
 TRUST_PROXY = os.getenv("ASTK_TRUST_PROXY", "0").lower() in {"1", "true", "yes"}
 JOB_QUEUE = JobQueue(lambda job_id: run_job(STORE, job_id))
+UPLOADS = UploadStore(
+    DATA_ROOT / "uploads",
+    max_upload_bytes=MAX_UPLOAD_BYTES,
+    chunk_size=UPLOAD_CHUNK_BYTES,
+    retention_seconds=UPLOAD_RETENTION_SECONDS,
+    max_sessions=MAX_UPLOAD_SESSIONS,
+)
 
 
 def cleanup_loop() -> None:
@@ -58,6 +70,9 @@ def cleanup_loop() -> None:
             removed = cleanup_expired_jobs(STORE.root, RETENTION_DAYS)
             if removed:
                 print(f"Removed {len(removed)} expired job(s): {', '.join(removed)}")
+            expired_uploads = UPLOADS.cleanup_expired()
+            if expired_uploads:
+                print(f"Removed {len(expired_uploads)} expired upload(s): {', '.join(expired_uploads)}")
         except Exception as exc:
             print(f"Job cleanup failed: {exc}", file=sys.stderr)
         time.sleep(CLEANUP_INTERVAL)
@@ -188,9 +203,62 @@ class ASTKHandler(SimpleHTTPRequestHandler):
         self.send_file(public_file, cache_control="public, max-age=300", include_body=False)
 
     def do_POST(self) -> None:
-        if self.path != "/api/jobs":
+        parsed = urlparse(self.path)
+        if parsed.path == "/api/uploads":
+            self.create_upload()
+            return
+        chunk_match = re.fullmatch(
+            r"/api/uploads/(UPL-[A-Za-z0-9-]+)/files/(\d+)/chunks/(\d+)",
+            parsed.path,
+        )
+        if chunk_match:
+            self.write_upload_chunk(
+                chunk_match.group(1),
+                int(chunk_match.group(2)),
+                int(chunk_match.group(3)),
+            )
+            return
+        if parsed.path != "/api/jobs":
             self.send_json({"error": "Not found"}, 404)
             return
+        self.create_job()
+
+    def read_json_body(self, *, max_bytes: int = 1024 * 1024) -> object:
+        try:
+            length = int(self.headers.get("Content-Length", "0"))
+        except ValueError:
+            raise ValueError("Invalid Content-Length")
+        if length <= 0 or length > max_bytes:
+            raise ValueError("Invalid or oversized request")
+        return json.loads(self.rfile.read(length).decode("utf-8"))
+
+    def create_upload(self) -> None:
+        try:
+            payload = self.read_json_body()
+            if not isinstance(payload, dict):
+                raise ValueError("Request must be a JSON object")
+            upload = UPLOADS.create(payload.get("files"))
+            self.send_json(upload, HTTPStatus.CREATED)
+        except (UnicodeDecodeError, ValueError, json.JSONDecodeError, UploadError, OSError) as exc:
+            status = HTTPStatus.SERVICE_UNAVAILABLE if "currently in progress" in str(exc) else HTTPStatus.BAD_REQUEST
+            self.send_json({"error": f"Invalid upload request: {exc}"}, status)
+
+    def write_upload_chunk(self, upload_id: str, file_index: int, chunk_index: int) -> None:
+        try:
+            length = int(self.headers.get("Content-Length", "0"))
+        except ValueError:
+            self.send_json({"error": "Invalid Content-Length"}, 400)
+            return
+        if length <= 0 or length > UPLOAD_CHUNK_BYTES:
+            self.send_json({"error": "Invalid or oversized upload chunk"}, HTTPStatus.REQUEST_ENTITY_TOO_LARGE)
+            return
+        try:
+            result = UPLOADS.write_chunk(upload_id, file_index, chunk_index, self.rfile, length)
+            self.send_json(result)
+        except (UploadError, OSError) as exc:
+            self.send_json({"error": f"Invalid upload chunk: {exc}"}, 400)
+
+    def create_job(self) -> None:
         try:
             length = int(self.headers.get("Content-Length", "0"))
         except ValueError:
@@ -202,6 +270,7 @@ class ASTKHandler(SimpleHTTPRequestHandler):
         content_type = self.headers.get("Content-Type", "")
         incoming_dir: Path | None = None
         job_id: str | None = None
+        upload_id: str | None = None
         try:
             if content_type.startswith("multipart/form-data"):
                 incoming_dir = Path(tempfile.mkdtemp(prefix=".upload-", dir=STORE.root))
@@ -216,8 +285,16 @@ class ASTKHandler(SimpleHTTPRequestHandler):
                 files = [(safe_filename(name), path) for name, path in stored_files]
             else:
                 body = self.rfile.read(length)
-                config = json.loads(body.decode("utf-8"))
-                files = []
+                payload = json.loads(body.decode("utf-8"))
+                if not isinstance(payload, dict):
+                    raise ValueError("request must be a JSON object")
+                if "upload_id" in payload:
+                    upload_id = str(payload.get("upload_id", ""))
+                    config = payload.get("config", {})
+                    files = [(name, None) for name in UPLOADS.file_names(upload_id)]
+                else:
+                    config = payload
+                    files = []
             if not isinstance(config, dict):
                 raise ValueError("config must be a JSON object")
             if os.getenv("ASTK_EXECUTION_MODE", "demo").lower() == "command":
@@ -228,16 +305,22 @@ class ASTKHandler(SimpleHTTPRequestHandler):
                 config["demo"] = True
             job = STORE.create(job_id, config)
             input_dir = STORE.job_dir(job_id) / "input"
-            for filename, source in files:
-                if not isinstance(source, Path):
-                    raise ValueError("Unexpected upload payload")
-                target = input_dir / filename
-                if target.exists():
-                    raise ValueError(f"Duplicate uploaded filename: {filename}")
-                shutil.move(str(source), str(target))
+            if upload_id:
+                assembled = UPLOADS.assemble(upload_id, input_dir)
+                if assembled != config["files"]:
+                    raise ValueError("Uploaded file metadata changed during assembly")
+                upload_id = None
+            else:
+                for filename, source in files:
+                    if not isinstance(source, Path):
+                        raise ValueError("Unexpected upload payload")
+                    target = input_dir / filename
+                    if target.exists():
+                        raise ValueError(f"Duplicate uploaded filename: {filename}")
+                    shutil.move(str(source), str(target))
             JOB_QUEUE.submit(job_id)
             self.send_json(job, HTTPStatus.ACCEPTED)
-        except (MultipartError, UnicodeDecodeError, ValueError, json.JSONDecodeError, OSError) as exc:
+        except (MultipartError, UnicodeDecodeError, ValueError, json.JSONDecodeError, UploadError, OSError) as exc:
             if job_id:
                 shutil.rmtree(STORE.job_dir(job_id), ignore_errors=True)
             self.send_json({"error": f"Invalid request: {exc}"}, 400)

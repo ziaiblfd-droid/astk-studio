@@ -17,6 +17,7 @@ from backend.planner import InputError, native_comparison_label, prepare_job, sa
 from backend.result_parser import parse_results
 from backend.runner import _runner_args
 from backend.server import resolve_public_file, validate_analysis_files
+from backend.upload_store import UploadError, UploadStore
 from backend.store import JobStore
 from backend.visualization import (
     VOLCANO_PVALUE_FLOOR,
@@ -493,6 +494,52 @@ class PipelineTests(unittest.TestCase):
             self.assertEqual(fields["config"], '{"species":"mm10"}')
             self.assertEqual(files[0][0], "quant.zip")
             self.assertEqual(files[0][1].read_bytes(), payload)
+
+    def test_chunked_upload_assembles_files(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            store = UploadStore(
+                root / "uploads",
+                max_upload_bytes=1024,
+                chunk_size=4,
+            )
+            upload = store.create(
+                [
+                    {"name": "quant.zip", "size": 7},
+                    {"name": "samples.csv", "size": 3},
+                ]
+            )
+            upload_id = str(upload["id"])
+            store.write_chunk(upload_id, 0, 0, io.BytesIO(b"abcd"), 4)
+            store.write_chunk(upload_id, 0, 1, io.BytesIO(b"efg"), 3)
+            store.write_chunk(upload_id, 1, 0, io.BytesIO(b"csv"), 3)
+
+            destination = root / "input"
+            self.assertEqual(store.assemble(upload_id, destination), ["quant.zip", "samples.csv"])
+            self.assertEqual((destination / "quant.zip").read_bytes(), b"abcdefg")
+            self.assertEqual((destination / "samples.csv").read_bytes(), b"csv")
+            self.assertFalse((root / "uploads" / upload_id).exists())
+
+    def test_chunked_upload_rejects_incomplete_file(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            store = UploadStore(
+                root / "uploads",
+                max_upload_bytes=1024,
+                chunk_size=4,
+            )
+            upload = store.create(
+                [
+                    {"name": "quant.zip", "size": 7},
+                    {"name": "samples.csv", "size": 3},
+                ]
+            )
+            upload_id = str(upload["id"])
+            store.write_chunk(upload_id, 0, 0, io.BytesIO(b"abcd"), 4)
+            store.write_chunk(upload_id, 1, 0, io.BytesIO(b"csv"), 3)
+
+            with self.assertRaises(UploadError):
+                store.assemble(upload_id, root / "input")
 
     def test_pending_jobs_are_recovered_after_restart(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

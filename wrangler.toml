@@ -3,6 +3,9 @@ main = "worker.js"
 compatibility_date = "2026-09-22"
 workers_dev = true
 
+[vars]
+ASTK_BACKEND_URL = "https://api.astkstudio.dpdns.org"
+
 [assets]
 directory = "."
 binding = "ASSETS"

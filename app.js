@@ -118,14 +118,44 @@ function bindUpload(){
   const typeSelector=document.querySelector('#heatmap-type');
   if(typeSelector)typeSelector.addEventListener('change',event=>{if(loadedResults)renderHeatmapImage(loadedResults,event.target.value);});
 }
+const uploadChunkRetries=4;
+function wait(milliseconds){return new Promise(resolve=>setTimeout(resolve,milliseconds));}
+async function responseError(response,fallback){try{const payload=await response.json();return payload.error||fallback;}catch{return fallback;}}
+async function uploadChunk(uploadId,fileIndex,chunkIndex,blob){
+  let lastError=null;
+  for(let attempt=1;attempt<=uploadChunkRetries;attempt++){
+    try{
+      const response=await fetch(`/api/uploads/${encodeURIComponent(uploadId)}/files/${fileIndex}/chunks/${chunkIndex}`,{method:'POST',headers:{'content-type':'application/octet-stream'},body:blob});
+      if(response.ok)return;
+      throw new Error(await responseError(response,`分块 ${chunkIndex+1} 上传失败`));
+    }catch(error){lastError=error;if(attempt<uploadChunkRetries)await wait(800*attempt);}
+  }
+  throw lastError||new Error(`分块 ${chunkIndex+1} 上传失败`);
+}
 async function createJob(){
   validateUpload();
   const files=submissionFiles();
   const config={data_source:document.querySelector('#data-source').value,species:document.querySelector('#species').value,design:document.querySelector('#design').value,comparison_mode:'baseline',event_type:'ALL',method:'empirical',p_value:Number(document.querySelector('input[aria-label="p value threshold"]').value),abs_dpsi:Number(document.querySelector('input[aria-label="absolute dpsi threshold"]').value),sequence_features:Boolean(document.querySelector('#sequence-features')?.checked),demo:false,files:files.map(file=>file.name)};
-  const form=new FormData();
-  form.append('config',JSON.stringify(config));
-  files.forEach(file=>form.append('files',file,file.name));
-  return fetch('/api/jobs',{method:'POST',body:form});
+  const sessionResponse=await fetch('/api/uploads',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({files:files.map(file=>({name:file.name,size:file.size,type:file.type}))})});
+  if(!sessionResponse.ok)throw new Error(await responseError(sessionResponse,'无法创建上传任务'));
+  const session=await sessionResponse.json();
+  const chunkSize=Number(session.chunk_size)||1024*1024;
+  const totalBytes=files.reduce((sum,file)=>sum+file.size,0);
+  let uploadedBytes=0;
+  for(let fileIndex=0;fileIndex<files.length;fileIndex++){
+    const file=files[fileIndex];
+    const chunks=Math.ceil(file.size/chunkSize);
+    for(let chunkIndex=0;chunkIndex<chunks;chunkIndex++){
+      const start=chunkIndex*chunkSize;
+      const blob=file.slice(start,Math.min(file.size,start+chunkSize));
+      const percent=Math.min(99,Math.round((uploadedBytes/Math.max(1,totalBytes))*100));
+      setRunLoader(true,`正在上传 ${file.name} · ${percent}%`);
+      await uploadChunk(session.id,fileIndex,chunkIndex,blob);
+      uploadedBytes+=blob.size;
+    }
+  }
+  setRunLoader(true,'上传完成，正在创建分析任务');
+  return fetch('/api/jobs',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({upload_id:session.id,config})});
 }
 function pickImage(items=[],token=''){const matches=items.filter(item=>item.name.toUpperCase().includes(token.toUpperCase()));return matches[matches.length-1]||items[0]||null;}
 function renderResultImage(containerId,item){if(!item||!currentJobId)return;const container=document.querySelector(containerId);if(!container)return;const source=encodeURI(`/api/jobs/${currentJobId}/files/${item.path}`);container.classList.add('result-image-frame');container.innerHTML=`<img class="result-plot" src="${source}" alt="${item.name}" loading="lazy" />`;}
