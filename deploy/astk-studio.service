@@ -1,24 +1,32 @@
 [Unit]
-Description=ASTK Studio web service
+Description=ASTK Studio backend (user service)
 After=network-online.target
 Wants=network-online.target
 
 [Service]
 Type=simple
-User=yushiye
-Group=yushiye
-WorkingDirectory=/home/yushiye/astk-studio
+WorkingDirectory=/home/yushiye/astk-web/current
 Environment=ASTK_HOST=127.0.0.1
 Environment=ASTK_PORT=4173
+Environment=ASTK_DATA_ROOT=/home/yushiye/astk-web/data
+Environment=ASTK_STUDIO_DIR=/home/yushiye/astk-web/current
 Environment=ASTK_EXECUTION_MODE=command
+Environment=ASTK_ENGINE=auto
 Environment=ASTK_WORKERS=10
 Environment=ASTK_MAX_CONCURRENT_JOBS=10
 Environment=ASTK_RETENTION_DAYS=1
+Environment=ASTK_CLEANUP_INTERVAL=3600
 Environment=ASTK_MAX_UPLOAD_BYTES=536870912
 Environment=ASTK_TRUST_PROXY=1
-ExecStart=/home/yushiye/astk-studio/scripts/run-conda-server.sh
+Environment=ASTK_REQUIRE_EQUAL_REPLICATES=0
+Environment=ASTK_MM10_GTF=/home/yushiye/project/gencode.vM25.annotation.gtf
+Environment=ASTK_MM10_FASTA=/home/yushiye/project/GRCm38.primary_assembly.genome.fa
+Environment=ASTK_JOB_TIMEOUT=21600
+Environment=ASTK_RUNNER_COMMAND=bash /home/yushiye/astk-web/current/scripts/run-astk-job.sh {job_dir}
+Environment=PYTHONPATH=/home/yushiye/astk-web/current
+ExecStart=/home/yushiye/astk-web/current/scripts/run-conda-server.sh
 Restart=always
-RestartSec=5
+RestartSec=10
 
 [Install]
-WantedBy=multi-user.target
+WantedBy=default.target

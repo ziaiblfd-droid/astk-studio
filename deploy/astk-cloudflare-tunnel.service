@@ -1,0 +1,16 @@
+[Unit]
+Description=ASTK Studio Cloudflare Named Tunnel keeper
+After=network-online.target astk-studio.service
+Wants=network-online.target astk-studio.service
+
+[Service]
+Type=simple
+Environment=ASTK_STUDIO_DIR=/home/yushiye/astk-web
+Environment=ASTK_PUBLIC_BACKEND_URL=https://api.astkstudio.dpdns.org
+Environment=ASTK_NAMED_TUNNEL_START_SCRIPT=/home/yushiye/astk-web/ops/start-cloudflare-named-tunnel.sh
+ExecStart=/home/yushiye/astk-web/ops/keep-cloudflare-named-tunnel.sh
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=default.target

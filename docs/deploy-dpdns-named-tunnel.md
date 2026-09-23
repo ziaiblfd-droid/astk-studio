@@ -65,13 +65,18 @@ bash scripts/start-cloudflare-named-tunnel.sh
 curl -fsS https://api.astkstudio.dpdns.org/api/health
 ```
 
-长期运行时启动守护脚本：
+长期运行使用用户级 systemd 服务。发布目录通过稳定软链接切换：
 
 ```bash
-nohup env ASTK_PUBLIC_BACKEND_URL=https://api.astkstudio.dpdns.org \
-  bash scripts/keep-cloudflare-named-tunnel.sh \
-  >> ~/astk-web/named-tunnel-keeper.log 2>&1 &
+ln -sfn ~/astk-web/releases/<commit> ~/astk-web/current
+mkdir -p ~/.config/systemd/user
+cp deploy/astk-studio.service ~/.config/systemd/user/
+cp deploy/astk-cloudflare-tunnel.service ~/.config/systemd/user/
+systemctl --user daemon-reload
+systemctl --user enable --now astk-studio.service astk-cloudflare-tunnel.service
 ```
+
+确认 `loginctl show-user "$USER" -p Linger` 为 `Linger=yes`，这样注销 SSH 或电脑关闭后，Linux 上的服务仍会继续运行并在 Linux 重启后恢复。
 
 ## 3. Worker 变量
 
@@ -98,6 +103,9 @@ curl -fsS https://astkstudio.dpdns.org/api/health
 ## 当前状态
 
 - `astkstudio.dpdns.org` 已绑定到 Worker，前端返回 HTTP 200。
-- Linux 后端 `127.0.0.1:4173` 正常，当前限制为 10 个并发任务。
-- 旧 Quick Tunnel 已失效，不能继续使用。
-- 当前还缺少 Named Tunnel Token，因此 Worker API 暂时返回 503。
+- `api.astkstudio.dpdns.org` 已通过名为 `astk-linux` 的 Named Tunnel 指向 `127.0.0.1:4173`。
+- Linux 后端和 Named Tunnel 均由用户级 systemd 管理，并已启用开机恢复。
+- 后端发布目录使用 `/home/yushiye/astk-web/current` 软链接，数据保存在共享目录 `/home/yushiye/astk-web/data`。
+- 当前限制为 10 个并发任务，任务与未完成上传均保留 24 小时。
+- 2026-09-23 已用 22.8 MB 真实输入完成公网分块上传、七类 AS 分析及报告 ZIP 完整性验证。
+- 旧 Quick Tunnel 已失效并不再用于生产环境。
