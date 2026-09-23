@@ -17,7 +17,7 @@ from backend.native_astk import canonicalize_native_outputs
 from backend.planner import InputError, native_comparison_label, prepare_job, safe_extract_zip
 from backend.result_parser import parse_results, read_event_ids
 from backend.runner import _runner_args, run_job
-from backend.sequence_features import _compare_features, _filter_psi, _gc_region_means
+from backend.sequence_features import _compare_features, _condition_sources, _filter_psi, _run_feature, run_sequence_features
 from backend.server import resolve_public_file, validate_analysis_files
 from backend.upload_store import UploadError, UploadStore
 from backend.store import JobStore
@@ -36,17 +36,22 @@ QUANT = "Name\tLength\tEffectiveLength\tTPM\tNumReads\nTX1\t1000\t800\t12.5\t10\
 
 
 class PipelineTests(unittest.TestCase):
-    def test_sequence_filter_requires_consistent_psi_across_conditions(self) -> None:
+    def test_sequence_filter_matches_condition_mean_psi(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
-            controls = root / "control.psi"
-            cases = root / "case.psi"
-            controls.write_text("event_id\tctrl\nstable-high\t0.9\nswitch\t0.1\n", encoding="utf-8")
-            cases.write_text("event_id\tcase\nstable-high\t0.9\nswitch\t0.9\n", encoding="utf-8")
-            selected = _filter_psi([controls, cases], {"stable-high", "switch"}, root / "high.psi", True)
-            self.assertEqual(selected, 1)
-            self.assertIn("stable-high", (root / "high.psi").read_text(encoding="utf-8"))
-            self.assertNotIn("switch", (root / "high.psi").read_text(encoding="utf-8"))
+            source = root / "condition.psi"
+            source.write_text(
+                "event_id\trep1\trep2\n"
+                "mean-high\t0.7\t0.9\n"
+                "mean-low\t0.1\t0.3\n"
+                "mixed\t0.2\t0.9\n"
+                "missing\tNA\t0.9\n",
+                encoding="utf-8",
+            )
+            self.assertEqual(_filter_psi(source, root / "high.psi", True, 0.8), 1)
+            self.assertEqual(_filter_psi(source, root / "low.psi", False, 0.2), 1)
+            self.assertIn("mean-high", (root / "high.psi").read_text(encoding="utf-8"))
+            self.assertIn("mean-low", (root / "low.psi").read_text(encoding="utf-8"))
 
     def test_sequence_filter_uses_custom_thresholds(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -54,28 +59,58 @@ class PipelineTests(unittest.TestCase):
             source = root / "psi.tsv"
             source.write_text("event_id\tsample\nhigh\t0.76\nlow\t0.24\n", encoding="utf-8")
             self.assertEqual(
-                _filter_psi([source], {"high", "low"}, root / "high.tsv", True, 0.75),
+                _filter_psi(source, root / "high.tsv", True, 0.75),
                 1,
             )
             self.assertEqual(
-                _filter_psi([source], {"high", "low"}, root / "low.tsv", False, 0.25),
+                _filter_psi(source, root / "low.tsv", False, 0.25),
                 1,
             )
 
-    def test_gc_region_means_preserves_per_event_values(self) -> None:
+    def test_sequence_conditions_deduplicate_reused_baseline(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
-            source = root / "gcc.csv"
-            source.write_text(
-                "event_id,A1_5SS_exon_b-1,A1_5SS_exon_b-2,A1_5SS_intron_b-1\n"
-                "e1,0.2,0.6,0.8\n", encoding="utf-8"
-            )
-            destination = root / "means.csv"
-            _gc_region_means(source, destination)
-            self.assertEqual(
-                destination.read_text(encoding="utf-8").splitlines(),
-                ["event_id,A1_5SS_exon,A1_5SS_intron", "e1,0.4,0.8"],
-            )
+            analysis = root / "output" / "analysis"
+            psi = analysis / "psi"
+            psi.mkdir(parents=True)
+            for group, treatment in (("g1", "12.5"), ("g2", "13.5")):
+                (psi / f"{group}_A3_c1.psi").write_text("event_id\tbaseline\ne1\t0.9\n", encoding="utf-8")
+                (psi / f"{group}_A3_c2.psi").write_text(f"event_id\t{treatment}\ne1\t0.1\n", encoding="utf-8")
+            comparisons = [
+                {"group": "g1", "control": "11.5", "treatment": "12.5"},
+                {"group": "g2", "control": "11.5", "treatment": "13.5"},
+            ]
+            sources = _condition_sources(analysis, comparisons)
+            self.assertEqual(list(sources), ["11.5", "12.5", "13.5"])
+            self.assertEqual(sources["11.5"]["A3"], psi / "g1_A3_c1.psi")
+            fasta = root / "genome.fa"
+            fasta.write_text(">chr1\nACGT\n", encoding="utf-8")
+            plan = {"reference": {"fasta": str(fasta)}, "comparisons": comparisons, "psi_high_threshold": 0.8, "psi_low_threshold": 0.2}
+            with patch("backend.sequence_features._run_feature", return_value=["plot.png"]) as feature, patch(
+                "backend.sequence_features._compare_features", return_value=[]
+            ) as compare:
+                summary = run_sequence_features(root, plan, root / "runner.log")
+            self.assertEqual(summary["selection_mode"], "condition_mean_all_events")
+            self.assertEqual(summary["selected_events"], 3)
+            self.assertEqual(len(summary["groups"]), 6)
+            self.assertEqual(feature.call_count, 12)
+            self.assertEqual(compare.call_count, 3)
+
+    def test_gc_extraction_keeps_profile_and_comparison_windows(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = root / "high.psi"
+            source.write_text("event_id\tsample\ne1\t0.9\n", encoding="utf-8")
+            def fake_run(command, **kwargs):
+                output = Path(command[command.index("-od") + 1])
+                (output / "gcc.csv").write_text("event_id,A1_5SS_exon_b0\ne1,0.5\n", encoding="utf-8")
+                return type("Result", (), {"returncode": 0, "stdout": "", "stderr": ""})()
+            with patch("backend.sequence_features.subprocess.run", side_effect=fake_run) as run:
+                _run_feature("gc", source, root / "gc", root / "genome.fa", root, [])
+                _run_feature("gc_comparison", source, root / "gc_comparison", root / "genome.fa", root, [])
+            commands = [call.args[0] for call in run.call_args_list]
+            self.assertEqual([command[command.index("-bs") + 1] for command in commands], ["75", "150"])
+            self.assertTrue(all("-alt" not in command for command in commands))
 
     def test_sequence_comparisons_use_vcmp_and_report_missing_inputs(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -85,6 +120,9 @@ class PipelineTests(unittest.TestCase):
                 source = output / "splice_score" / f"g1_SE_{stratum}" / "splice_scores.csv"
                 source.parent.mkdir(parents=True)
                 source.write_text("event_id,A1_5SS\ne1,1\n", encoding="utf-8")
+                gc = output / "gc_comparison" / f"g1_SE_{stratum}" / "gcc.csv"
+                gc.parent.mkdir(parents=True)
+                gc.write_text("event_id,A1_5SS_exon_b0\ne1,0.5\n", encoding="utf-8")
             def fake_run(command, **kwargs):
                 Path(command[command.index("-o") + 1]).write_bytes(b"png")
                 return type("Result", (), {"returncode": 0, "stdout": "test result", "stderr": ""})()
@@ -95,9 +133,13 @@ class PipelineTests(unittest.TestCase):
                 )
             self.assertEqual(items[0]["status"], "completed")
             self.assertTrue(items[0]["image"].endswith("splice_score_high_vs_low.png"))
-            self.assertEqual(items[1]["status"], "failed")
+            self.assertEqual(items[1]["status"], "completed")
             self.assertEqual(items[2]["status"], "failed")
             self.assertIn("vcmp", run.call_args.args[0])
+            gc_command = run.call_args_list[1].args[0]
+            self.assertIn("--facet", gc_command)
+            self.assertIn(str(output / "gc_comparison" / "g1_SE_high" / "gcc.csv"), gc_command)
+            self.assertNotIn("-mc", gc_command)
             self.assertEqual(
                 _compare_features(root, output, "g1", "SE", {"selected_events": 0}, {"selected_events": 3}, []),
                 [],
