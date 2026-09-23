@@ -14,7 +14,7 @@ from backend.job_queue import recover_pending_jobs
 from backend.multipart import parse_multipart_stream
 from backend.native_astk import canonicalize_native_outputs
 from backend.planner import InputError, native_comparison_label, prepare_job, safe_extract_zip
-from backend.result_parser import parse_results
+from backend.result_parser import parse_results, read_event_ids
 from backend.runner import _runner_args
 from backend.server import resolve_public_file, validate_analysis_files
 from backend.upload_store import UploadError, UploadStore
@@ -248,6 +248,7 @@ class PipelineTests(unittest.TestCase):
                 native,
                 analysis,
                 [{"group": "g1"}],
+                0.05,
                 0.0,
             )
 
@@ -258,6 +259,36 @@ class PipelineTests(unittest.TestCase):
             self.assertEqual(copied["significant_psi"], 2)
             self.assertTrue((analysis / "sig01" / "dpsi" / "g1_SE.sig.dpsi").is_file())
             self.assertTrue((analysis / "sig01" / "psi" / "g1_SE_c1.sig.psi").is_file())
+
+    def test_native_astk_derives_per_type_significant_files(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            native = root / "native"
+            analysis = root / "analysis"
+            (native / "dpsi").mkdir(parents=True)
+            (native / "sig01").mkdir(parents=True)
+            (native / "dpsi" / "g1_SE.dpsi").write_text(
+                "event_id\tdPSI\tp-value\n"
+                "GENE1;SE:chr1:10-20:30-40:+\t0.25\t0.01\n"
+                "GENE2;SE:chr1:50-60:70-80:+\t0.05\t0.001\n"
+                "GENE3;SE:chr1:90-100:110-120:+\t-0.30\t0.10\n",
+                encoding="utf-8",
+            )
+
+            copied = canonicalize_native_outputs(
+                native,
+                analysis,
+                [{"group": "g1"}],
+                0.05,
+                0.1,
+            )
+
+            significant = analysis / "sig01" / "dpsi" / "g1_SE.sig.dpsi"
+            self.assertEqual(copied["significant"], 1)
+            self.assertEqual(
+                read_event_ids(significant),
+                {"GENE1;SE:chr1:10-20:30-40:+"},
+            )
 
     def test_upset_uses_first_and_last_two_timepoint_comparisons(self) -> None:
         comparisons = [{"group": f"g{index}"} for index in range(1, 5)]

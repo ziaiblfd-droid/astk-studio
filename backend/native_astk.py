@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from .planner import InputError
+from .visualization import filter_significant_dpsi
 
 
 EVENT_TYPES = ("A3", "A5", "AF", "AL", "MX", "RI", "SE")
@@ -112,6 +113,7 @@ def canonicalize_native_outputs(
     native_dir: Path,
     analysis_dir: Path,
     comparisons: list[dict[str, str]],
+    p_value: float,
     abs_dpsi: float,
 ) -> dict[str, int]:
     copied = {"events": 0, "psi": 0, "dpsi": 0, "significant": 0, "significant_psi": 0}
@@ -147,8 +149,14 @@ def canonicalize_native_outputs(
                 copied["dpsi"] += 1
 
             sig_source = native_significant_dir / f"{group}_{kind}.sig.dpsi"
+            sig_destination = significant_dir / f"{group}_{kind}.sig.dpsi"
             if sig_source.is_file():
-                _copy(sig_source, significant_dir / f"{group}_{kind}.sig.dpsi")
+                _copy(sig_source, sig_destination)
+                copied["significant"] += 1
+            elif dpsi_source.is_file():
+                # dsflow may emit only an aggregate sig file. Match the
+                # established ASTK CLI workflow by deriving per-type files.
+                filter_significant_dpsi(dpsi_source, sig_destination, p_value, abs_dpsi)
                 copied["significant"] += 1
 
             for suffix in ("c1", "c2"):
@@ -198,6 +206,7 @@ def run_native_astk(
         native_dir,
         job_dir / "output" / "analysis",
         list(plan.get("comparisons", [])),
+        p_value,
         abs_dpsi,
     )
     try:
