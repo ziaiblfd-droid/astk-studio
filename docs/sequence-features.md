@@ -45,6 +45,12 @@ from that shared job-local catalog. The temporary catalog is removed after
 the feature stage. This cache is per job: it does not share results between
 different users' jobs or assume the genome reference is unchanged.
 
+AF and SE splice-site scoring split the union into up to eight event shards
+(`ASTK_SPLICE_SHARDS`, capped by `ASTK_SEQUENCE_WORKERS`). The original ASTK
+scoring command runs per shard; tables are validated, restored to catalog
+event order, and rendered once after merging. Set `ASTK_SPLICE_SHARDS=1`
+to disable splitting without changing other extraction parallelism.
+
 `summary.json` records the sequence-stage elapsed time and per-command
 timings. During extraction, figure generation, and comparison the job's
 stage/progress is updated. More RAM does not accelerate an idle server; tune

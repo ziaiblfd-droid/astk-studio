@@ -308,6 +308,33 @@ def _timed_comparison(
     return comparisons, lines, time.monotonic() - started
 
 
+def _merge_splice_shards(catalog_psi: Path, shard_dirs: list[Path], destination: Path) -> None:
+    _, source_rows = _read_table(catalog_psi)
+    expected_ids = [row[0] for row in source_rows]
+    values: dict[str, list[str]] = {}
+    header: list[str] | None = None
+    for shard in shard_dirs:
+        with (shard / "splice_scores.csv").open("r", encoding="utf-8", newline="") as handle:
+            reader = csv.reader(handle)
+            columns = next(reader)
+            if header is not None and columns != header:
+                raise ValueError("Splice-score shard columns do not match")
+            header = columns
+            for row in reader:
+                if not row or len(row) != len(columns) or row[0] in values:
+                    raise ValueError("Invalid or duplicate splice-score shard row")
+                values[row[0]] = row
+    if len(values) != len(expected_ids) or set(values) != set(expected_ids):
+        raise ValueError("Splice-score shards did not cover the catalog event IDs")
+    destination.mkdir(parents=True, exist_ok=True)
+    table = destination / "splice_scores.csv"
+    with table.open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.writer(handle)
+        writer.writerow(header)
+        writer.writerows(values[event_id] for event_id in expected_ids)
+    _render_feature("splice_score", table, destination / "splice_scores_box.png")
+
+
 def run_sequence_features(job_dir: Path, plan: dict[str, Any], log_path: Path) -> dict[str, Any]:
     output_root = job_dir / "output" / "sequence_features"
     psi_root = output_root / "psi"
@@ -329,6 +356,7 @@ def run_sequence_features(job_dir: Path, plan: dict[str, Any], log_path: Path) -
     feature_comparisons: list[dict[str, Any]] = []
     timings: dict[str, Any] = {"extraction_seconds": {}, "comparison_seconds": {}}
     workers = max(1, min(8, int(os.getenv("ASTK_SEQUENCE_WORKERS", "8"))))
+    splice_shards = max(1, min(workers, int(os.getenv("ASTK_SPLICE_SHARDS", "8"))))
     features = ("splice_score", "gc", "gc_comparison", "element_length")
     conditions = _condition_sources(analysis_dir, plan.get("comparisons", []))
     members_by_kind: dict[str, list[dict[str, Any]]] = defaultdict(list)
@@ -377,7 +405,7 @@ def run_sequence_features(job_dir: Path, plan: dict[str, Any], log_path: Path) -
             handle.write("\n".join(lines) + "\n")
 
     write_log(log)
-    tasks: list[tuple[str, str]] = []
+    tasks: list[tuple[str, str, int | None]] = []
     with tempfile.TemporaryDirectory(prefix=".sequence-cache-", dir=job_dir) as temporary:
         cache_root = Path(temporary)
         with ThreadPoolExecutor(max_workers=workers) as pool:
@@ -391,20 +419,35 @@ def run_sequence_features(job_dir: Path, plan: dict[str, Any], log_path: Path) -
                     writer.writerow(["event_id", "sample"])
                     writer.writerows([row[0], row[1]] for row in rows.values())
                 for feature in features:
-                    tasks.append((kind, feature))
-                    destination = catalog / feature
-                    pending[pool.submit(_timed_feature, feature, psi, destination, fasta, job_dir)] = (kind, feature)
+                    count = min(splice_shards, len(rows)) if feature == "splice_score" and kind in {"AF", "SE"} else 1
+                    if count > 1:
+                        shard_rows: list[list[list[str]]] = [[] for _ in range(count)]
+                        for index, row in enumerate(rows.values()):
+                            shard_rows[index % count].append([row[0], row[1]])
+                        for index, part in enumerate(shard_rows):
+                            shard_psi = catalog / f"splice-shard-{index}.psi"
+                            with shard_psi.open("w", encoding="utf-8", newline="") as handle:
+                                writer = csv.writer(handle, delimiter="\t", lineterminator="\n")
+                                writer.writerow(["event_id", "sample"])
+                                writer.writerows(part)
+                            destination = catalog / "splice_shards" / f"part-{index}"
+                            tasks.append((kind, feature, index))
+                            pending[pool.submit(_timed_feature, feature, shard_psi, destination, fasta, job_dir)] = (kind, feature, index)
+                    else:
+                        tasks.append((kind, feature, None))
+                        destination = catalog / feature
+                        pending[pool.submit(_timed_feature, feature, psi, destination, fasta, job_dir)] = (kind, feature, None)
             failed: set[tuple[str, str]] = set()
-            for future in as_completed(pending):
-                kind, feature = pending[future]
+            for done, future in enumerate(as_completed(pending), 1):
+                kind, feature, shard = pending[future]
+                label = f"{kind}/{feature}" + (f"/shard-{shard}" if shard is not None else "")
                 try:
                     lines, seconds = future.result()
-                    timings["extraction_seconds"][f"{kind}/{feature}"] = round(seconds, 3)
-                    write_log([*lines, f"TIMING extraction {kind}/{feature}: {seconds:.3f}s"])
+                    timings["extraction_seconds"][label] = round(seconds, 3)
+                    write_log([*lines, f"TIMING extraction {label}: {seconds:.3f}s"])
                 except Exception as error:
                     failed.add((kind, feature))
-                    write_log([f"Extraction failed for {kind}/{feature}: {error}"])
-                done = len(timings["extraction_seconds"]) + len(failed)
+                    write_log([f"Extraction failed for {label}: {error}"])
                 _progress(job_dir, f"Sequence features: extracting {done}/{len(tasks)}", 72 + int(13 * done / len(tasks)))
 
         for kind_index, (kind, members) in enumerate(members_by_kind.items(), 1):
@@ -413,6 +456,12 @@ def run_sequence_features(job_dir: Path, plan: dict[str, Any], log_path: Path) -
                     error = f"Shared {feature} extraction failed for {kind}"
                 else:
                     try:
+                        shard_dirs = sorted((cache_root / kind / "splice_shards").glob("part-*"))
+                        if feature == "splice_score" and shard_dirs:
+                            _merge_splice_shards(
+                                cache_root / kind / f"{kind}.psi", shard_dirs,
+                                cache_root / kind / feature,
+                            )
                         _split_cached_feature(feature, cache_root / kind / feature, output_root, job_dir, members)
                         continue
                     except Exception as exc:
@@ -457,6 +506,7 @@ def run_sequence_features(job_dir: Path, plan: dict[str, Any], log_path: Path) -
         + sum(item["status"] == "failed" for item in feature_comparisons),
         "execution": {
             "parallel_limit": workers,
+            "splice_shards": splice_shards,
             "elapsed_seconds": round(time.monotonic() - started, 3),
             **timings,
         },

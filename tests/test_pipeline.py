@@ -17,7 +17,7 @@ from backend.native_astk import canonicalize_native_outputs
 from backend.planner import InputError, native_comparison_label, prepare_job, safe_extract_zip
 from backend.result_parser import parse_results, read_event_ids
 from backend.runner import _runner_args, run_job
-from backend.sequence_features import _compare_features, _condition_sources, _filter_psi, _render_feature, _run_feature, _split_cached_feature, run_sequence_features
+from backend.sequence_features import _compare_features, _condition_sources, _filter_psi, _merge_splice_shards, _render_feature, _run_feature, _split_cached_feature, run_sequence_features
 from backend.server import resolve_public_file, validate_analysis_files
 from backend.upload_store import UploadError, UploadStore
 from backend.store import JobStore
@@ -131,6 +131,75 @@ class PipelineTests(unittest.TestCase):
             self.assertNotIn("e2", high)
             self.assertIn("e2,0.63,0.48", low)
             self.assertTrue(members[0]["outputs"]["gc_comparison"][1].endswith("gcc.png"))
+
+    def test_splice_shards_merge_in_catalog_order_and_reject_missing_events(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            psi = root / "catalog.psi"
+            psi.write_text("event_id\tsample\ne1\t0.9\ne2\t0.8\ne3\t0.9\n", encoding="utf-8")
+            shards = [root / "part-0", root / "part-1"]
+            for shard in shards:
+                shard.mkdir()
+            (shards[0] / "splice_scores.csv").write_text(
+                "event_id,A1_5SS\ne3,3.0\ne1,1.0\n", encoding="utf-8"
+            )
+            (shards[1] / "splice_scores.csv").write_text(
+                "event_id,A1_5SS\ne2,2.0\n", encoding="utf-8"
+            )
+            with patch("backend.sequence_features._render_feature", side_effect=lambda _, __, path: path.write_bytes(b"png")):
+                _merge_splice_shards(psi, shards, root / "merged")
+            self.assertEqual(
+                (root / "merged" / "splice_scores.csv").read_text(encoding="utf-8").splitlines(),
+                ["event_id,A1_5SS", "e1,1.0", "e2,2.0", "e3,3.0"],
+            )
+            (shards[1] / "splice_scores.csv").write_text("event_id,A1_5SS\n", encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "cover"):
+                _merge_splice_shards(psi, shards, root / "incomplete")
+
+    def test_af_se_shards_run_under_eight_worker_limit(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            psi_dir = root / "output" / "analysis" / "psi"
+            psi_dir.mkdir(parents=True)
+            for kind in ("AF", "SE"):
+                for role, value in (("c1", "0.9"), ("c2", "0.1")):
+                    (psi_dir / f"g1_{kind}_{role}.psi").write_text(
+                        "event_id\tsample\n"
+                        + "".join(f"e{i}\t{value}\n" for i in range(12)),
+                        encoding="utf-8",
+                    )
+            fasta = root / "genome.fa"
+            fasta.write_text(">chr1\nACGT\n", encoding="utf-8")
+            plan = {
+                "reference": {"fasta": str(fasta)},
+                "comparisons": [{"group": "g1", "control": "11.5", "treatment": "12.5"}],
+            }
+
+            def fake_feature(feature, psi, destination, *_):
+                if feature == "splice_score":
+                    destination.mkdir(parents=True)
+                    rows = psi.read_text(encoding="utf-8").splitlines()[1:]
+                    (destination / "splice_scores.csv").write_text(
+                        "event_id,A1_5SS\n" + "".join(f"{row.split(chr(9))[0]},1.0\n" for row in rows),
+                        encoding="utf-8",
+                    )
+                return []
+
+            with patch.dict("os.environ", {"ASTK_SPLICE_SHARDS": "8"}), patch(
+                "backend.sequence_features._run_feature", side_effect=fake_feature
+            ) as feature, patch(
+                "backend.sequence_features._render_feature"
+            ), patch(
+                "backend.sequence_features._split_cached_feature"
+            ), patch(
+                "backend.sequence_features._compare_features", return_value=[]
+            ):
+                summary = run_sequence_features(root, plan, root / "runner.log")
+            self.assertEqual(feature.call_count, 22)
+            self.assertEqual(summary["failed"], 0)
+            self.assertEqual(summary["execution"]["parallel_limit"], 8)
+            self.assertEqual(summary["execution"]["splice_shards"], 8)
+            self.assertFalse(list(root.glob(".sequence-cache-*")))
 
     def test_cached_feature_renders_each_plot(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
