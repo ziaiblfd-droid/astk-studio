@@ -86,7 +86,9 @@ class PipelineTests(unittest.TestCase):
             fasta = root / "genome.fa"
             fasta.write_text(">chr1\nACGT\n", encoding="utf-8")
             plan = {"reference": {"fasta": str(fasta)}, "comparisons": comparisons, "psi_high_threshold": 0.8, "psi_low_threshold": 0.2}
-            with patch("backend.sequence_features._run_feature", return_value=["plot.png"]) as feature, patch(
+            with patch.dict("os.environ", {"ASTK_SEQUENCE_WORKERS": "32"}), patch(
+                "backend.sequence_features._run_feature", return_value=["plot.png"]
+            ) as feature, patch(
                 "backend.sequence_features._split_cached_feature"
             ), patch(
                 "backend.sequence_features._compare_features", return_value=[]
@@ -97,6 +99,7 @@ class PipelineTests(unittest.TestCase):
             self.assertEqual(len(summary["groups"]), 6)
             self.assertEqual(feature.call_count, 4)
             self.assertEqual(compare.call_count, 3)
+            self.assertEqual(summary["execution"]["parallel_limit"], 16)
 
     def test_cached_feature_preserves_selected_event_values(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

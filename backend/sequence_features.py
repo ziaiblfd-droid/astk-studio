@@ -328,7 +328,7 @@ def run_sequence_features(job_dir: Path, plan: dict[str, Any], log_path: Path) -
     groups: list[dict[str, Any]] = []
     feature_comparisons: list[dict[str, Any]] = []
     timings: dict[str, Any] = {"extraction_seconds": {}, "comparison_seconds": {}}
-    workers = max(1, min(8, int(os.getenv("ASTK_SEQUENCE_WORKERS", "8"))))
+    workers = max(1, min(16, int(os.getenv("ASTK_SEQUENCE_WORKERS", "16"))))
     features = ("splice_score", "gc", "gc_comparison", "element_length")
     conditions = _condition_sources(analysis_dir, plan.get("comparisons", []))
     members_by_kind: dict[str, list[dict[str, Any]]] = defaultdict(list)
