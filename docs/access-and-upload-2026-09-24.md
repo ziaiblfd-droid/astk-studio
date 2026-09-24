@@ -4,12 +4,15 @@
 
 Browser -> Cloudflare Worker `/api/uploads` -> named tunnel -> Python backend.
 The former uploader sent 1 MiB chunks sequentially. It now negotiates the
-chunk size with the backend (default 4 MiB) and sends up to three chunks
+chunk size with the backend (default 256 KiB) and sends up to three chunks
 concurrently. Per-chunk retries remain; the server checks exact chunk lengths
 and refuses to assemble missing chunks. The UI shows completed bytes and an
 observed-rate-based upload estimate separately from analysis progress.
 
-The change reduces request overhead, but cannot increase the user's actual
+The 4 MiB default failed in practice: a 256 KiB public request took ~31 seconds
+on the affected route, so a 4 MiB request outlived the stable connection and
+was canceled with no completed chunk. Shorter chunks let completed work survive
+retries. The change cannot increase the user's actual
 uplink capacity or overcome packet loss. Do not infer a ten-minute public
 upload time from a local-network benchmark. If public uploads are still slow,
 record the ZIP size, network/ISP, whether VPN was enabled, a HAR capture

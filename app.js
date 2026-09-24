@@ -121,6 +121,7 @@ function bindUpload(){
 }
 const uploadChunkRetries=4;
 const uploadConcurrency=3;
+const uploadChunkTimeout=90000;
 function wait(milliseconds){return new Promise(resolve=>setTimeout(resolve,milliseconds));}
 function displayUploadProgress(uploaded,total,started,fileName){
   const percent=Math.min(100,Math.round(uploaded/Math.max(1,total)*100));
@@ -134,16 +135,26 @@ function displayUploadProgress(uploaded,total,started,fileName){
   setRunLoader(true,`正在上传 ${fileName} · ${percent}%`);
 }
 async function responseError(response,fallback){try{const payload=await response.json();return payload.error||fallback;}catch{return fallback;}}
-async function uploadChunk(uploadId,fileIndex,chunkIndex,blob){
+async function uploadChunk(uploadId,fileIndex,chunkIndex,blob,onRetry){
   let lastError=null;
   for(let attempt=1;attempt<=uploadChunkRetries;attempt++){
     try{
-      const response=await fetch(`/api/uploads/${encodeURIComponent(uploadId)}/files/${fileIndex}/chunks/${chunkIndex}`,{method:'POST',headers:{'content-type':'application/octet-stream'},body:blob});
+      const response=await fetch(`/api/uploads/${encodeURIComponent(uploadId)}/files/${fileIndex}/chunks/${chunkIndex}`,{method:'POST',headers:{'content-type':'application/octet-stream'},body:blob,signal:AbortSignal.timeout(uploadChunkTimeout)});
       if(response.ok)return;
-      throw new Error(await responseError(response,`分块 ${chunkIndex+1} 上传失败`));
-    }catch(error){lastError=error;if(attempt<uploadChunkRetries)await wait(800*attempt);}
+      const message=await responseError(response,`分块 ${chunkIndex+1} 上传失败`);
+      if(response.status>=400&&response.status<500&&response.status!==408&&response.status!==429){
+        throw Object.assign(new Error(message),{retryable:false});
+      }
+      throw new Error(message);
+    }catch(error){
+      lastError=error;
+      if(error.retryable===false)break;
+      if(attempt===uploadChunkRetries)break;
+      onRetry(attempt+1);
+      await wait(1000*attempt);
+    }
   }
-  throw lastError||new Error(`分块 ${chunkIndex+1} 上传失败`);
+  throw new Error(`分块 ${chunkIndex+1} 上传失败：${lastError?.message||'网络连接中断'}`);
 }
 async function createJob(){
   validateUpload();
@@ -173,7 +184,9 @@ async function createJob(){
       const task=queue[next++];
       const blob=task.file.slice(task.start,Math.min(task.file.size,task.start+chunkSize));
       try{
-        await uploadChunk(session.id,task.fileIndex,task.chunkIndex,blob);
+        await uploadChunk(session.id,task.fileIndex,task.chunkIndex,blob,attempt=>{
+          document.querySelector('#run-estimate').textContent=`网络不稳定，正在重试第 ${task.chunkIndex+1} 块（第 ${attempt}/${uploadChunkRetries} 次）`;
+        });
         uploadedBytes+=blob.size;
         displayUploadProgress(uploadedBytes,totalBytes,started,task.file.name);
       }catch(error){failure=error;break;}
@@ -272,7 +285,7 @@ async function loadResults(jobId){const response=await fetch(`/api/jobs/${jobId}
 async function loadJobContext(jobId){const response=await fetch(`/api/jobs/${jobId}`,{cache:'no-store'});if(!response.ok)throw new Error('无法读取任务状态');const job=await response.json();currentJobId=job.id;currentJobContext=job;document.querySelector('#workspace-name').textContent=job.id;document.querySelector('#workspace-run-label').textContent=`ANALYSIS WORKSPACE / ${job.id}`;const idNode=document.querySelector('.run-id strong');if(idNode)idNode.textContent=job.id;const demo=document.querySelector('.demo-pill');if(demo)demo.lastChild.textContent=' ASTK job';const config=job.config||{};setSelectValue('#data-source',config.data_source);setSelectValue('#species',config.species);setSelectValue('#design',config.design);const featureToggle=document.querySelector('#sequence-features');if(featureToggle)featureToggle.checked=Boolean(config.sequence_features);const threshold=document.querySelector('input[aria-label="p value threshold"]');if(threshold&&config.p_value!==undefined)threshold.value=config.p_value;const dpsiThreshold=document.querySelector('input[aria-label="absolute dpsi threshold"]');if(dpsiThreshold&&config.abs_dpsi!==undefined)dpsiThreshold.value=config.abs_dpsi;const highPsi=document.querySelector('input[aria-label="high psi threshold"]');if(highPsi&&config.psi_high_threshold!==undefined)highPsi.value=config.psi_high_threshold;const lowPsi=document.querySelector('input[aria-label="low psi threshold"]');if(lowPsi&&config.psi_low_threshold!==undefined)lowPsi.value=config.psi_low_threshold;if(Array.isArray(config.files))renderFileList(config.files,'已提交');updateJobStatus(job);return job;}
 async function pollJob(jobId){const job=await loadJobContext(jobId);if(job.status==='completed'){await loadResults(jobId);return job;}if(job.status==='failed')throw new Error(job.error||'ASTK 任务失败');await new Promise(resolve=>setTimeout(resolve,2000));return pollJob(jobId);}
 async function runStaticDemo(){const fill=document.querySelector('#progress-fill'),value=document.querySelector('#progress-value'),text=document.querySelector('#progress-text'),statusTag=document.querySelector('.status-tag');setRunLoader(true,'正在生成演示结果');for(const [progress,stage] of [[12,'Input validation'],[26,'Metadata generation'],[48,'Seven-class event generation'],[68,'PSI quantification'],[88,'Differential splicing'],[100,'Report generation']]){fill.style.width=`${progress}%`;value.textContent=`${progress}%`;text.textContent=stage;setRunLoader(true,stage);if(statusTag)statusTag.innerHTML='<span></span> DEMO';await new Promise(resolve=>setTimeout(resolve,260));}text.textContent='7 / 7 demo stages complete';setRunLoader(false);if(statusTag)statusTag.innerHTML='<span></span> DEMO READY';}
-function bindRun(){document.querySelector('#run-analysis').addEventListener('click',async()=>{const button=document.querySelector('#run-analysis');button.disabled=true;button.innerHTML='<i data-lucide="loader-circle"></i>提交中';setRunLoader(true,'正在提交分析任务');iconRefresh();try{if(!backendAvailable){await runStaticDemo();button.innerHTML='<i data-lucide="check"></i>演示完成';showToast(window.location.hostname.endsWith('github.io')?'GitHub Pages 仅展示演示结果':'未连接计算服务，请配置云端 ASTK 后端');return;}validateUpload();document.querySelector('#progress-fill').style.width='0%';document.querySelector('#progress-value').textContent='0%';const response=await createJob();if(!response.ok){const error=await response.json();throw new Error(error.error||'任务提交失败');}const job=await response.json();currentJobId=job.id;currentJobContext=job;history.replaceState(null,'',`?job=${encodeURIComponent(job.id)}`);updateJobStatus(job);const idNode=document.querySelector('.run-id strong');if(idNode)idNode.textContent=job.id;button.innerHTML='<i data-lucide="loader-circle"></i>运行中';iconRefresh();await pollJob(job.id);button.innerHTML='<i data-lucide="check"></i>分析完成';showToast('ASTK 任务已完成，结果已更新');}catch(error){setRunLoader(false);button.innerHTML='<i data-lucide="triangle-alert"></i>运行失败';showToast(error.message);}finally{button.disabled=false;iconRefresh();setTimeout(()=>{button.innerHTML='<i data-lucide="play"></i>运行分析';iconRefresh();},2400);}});document.querySelector('#reset-demo').addEventListener('click',()=>{history.replaceState(null,'',window.location.pathname);window.location.reload();});}
+function bindRun(){document.querySelector('#run-analysis').addEventListener('click',async()=>{const button=document.querySelector('#run-analysis');button.disabled=true;button.innerHTML='<i data-lucide="loader-circle"></i>提交中';setRunLoader(true,'正在提交分析任务');iconRefresh();try{if(!backendAvailable){await runStaticDemo();button.innerHTML='<i data-lucide="check"></i>演示完成';showToast(window.location.hostname.endsWith('github.io')?'GitHub Pages 仅展示演示结果':'未连接计算服务，请配置云端 ASTK 后端');return;}validateUpload();document.querySelector('#progress-fill').style.width='0%';document.querySelector('#progress-value').textContent='0%';const response=await createJob();if(!response.ok){const error=await response.json();throw new Error(error.error||'任务提交失败');}const job=await response.json();currentJobId=job.id;currentJobContext=job;history.replaceState(null,'',`?job=${encodeURIComponent(job.id)}`);updateJobStatus(job);const idNode=document.querySelector('.run-id strong');if(idNode)idNode.textContent=job.id;button.innerHTML='<i data-lucide="loader-circle"></i>运行中';iconRefresh();await pollJob(job.id);button.innerHTML='<i data-lucide="check"></i>分析完成';showToast('ASTK 任务已完成，结果已更新');}catch(error){setRunLoader(false);if(document.querySelector('#progress-label').textContent==='上传进度'){document.querySelector('#run-estimate').textContent=`上传失败：${error.message}`;document.querySelector('#progress-text').textContent='上传中断，请重试';}button.innerHTML='<i data-lucide="triangle-alert"></i>运行失败';showToast(error.message);}finally{button.disabled=false;iconRefresh();setTimeout(()=>{button.innerHTML='<i data-lucide="play"></i>运行分析';iconRefresh();},2400);}});document.querySelector('#reset-demo').addEventListener('click',()=>{history.replaceState(null,'',window.location.pathname);window.location.reload();});}
 function csvCell(value){const text=String(value??'');return `"${text.replaceAll('"','""')}"`;}
 function exportRows(rows,filename){if(!rows.length){showToast('当前没有可导出的结果');return;}const header=['Event ID','Gene','Type','Condition','PSI','dPSI','p-value'];const content='\ufeff'+[header,...rows].map(row=>row.map(csvCell).join(',')).join('\r\n');const blob=new Blob([content],{type:'text/csv;charset=utf-8'});const url=URL.createObjectURL(blob);const link=document.createElement('a');link.href=url;link.download=filename;document.body.appendChild(link);link.click();link.remove();URL.revokeObjectURL(url);showToast(`已导出 ${rows.length.toLocaleString()} 条事件`);}
 function filteredEvents(scope=currentResultScope){const search=(document.querySelector('#event-search')?.value||'').toLowerCase();const direction=document.querySelector('#event-filter')?.value||'all';const activeType=document.querySelector('.event-tab.active')?.dataset.type||'ALL';return sampleEvents.filter(row=>(activeType==='ALL'||row[2]===activeType)&&(!search||row.join(' ').toLowerCase().includes(search))&&(direction==='all'||(direction==='up'?row[5].startsWith('+'):row[5].startsWith('-'))));}

@@ -52,7 +52,7 @@ PUBLIC_FILES = {
     "/templates/samples.csv": ROOT / "templates" / "samples.csv",
 }
 MAX_UPLOAD_BYTES = int(os.getenv("ASTK_MAX_UPLOAD_BYTES", str(512 * 1024 * 1024)))
-UPLOAD_CHUNK_BYTES = int(os.getenv("ASTK_UPLOAD_CHUNK_BYTES", str(4 * 1024 * 1024)))
+UPLOAD_CHUNK_BYTES = int(os.getenv("ASTK_UPLOAD_CHUNK_BYTES", str(256 * 1024)))
 UPLOAD_RETENTION_SECONDS = int(os.getenv("ASTK_UPLOAD_RETENTION_SECONDS", "86400"))
 MAX_UPLOAD_SESSIONS = int(os.getenv("ASTK_MAX_UPLOAD_SESSIONS", "20"))
 RETENTION_DAYS = float(os.getenv("ASTK_RETENTION_DAYS", "7"))
