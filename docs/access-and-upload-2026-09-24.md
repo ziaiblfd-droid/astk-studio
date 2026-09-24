@@ -25,6 +25,13 @@ The frontend no longer depends at runtime on fonts.googleapis.com or
 unpkg.com; icons are served from the same site, and system fonts are used.
 This removes two unrelated external requests from the critical path.
 
+The tunnel keeper previously restarted `cloudflared` when the local backend
+briefly failed its health check, even while the tunnel itself was ready.
+Backend deployments could therefore trigger a tunnel reconnect and an
+avoidable Cloudflare 530. The keeper now restarts only after three consecutive
+failed tunnel-readiness checks; backend health remains the backend service's
+responsibility. This does not solve blocked or lossy egress on TCP/UDP 7844.
+
 An intermittent VPN-dependent failure can still occur before the frontend
 loads or between a client and Cloudflare, or between Cloudflare and the
 tunnel. A single successful health request does not establish availability
@@ -41,6 +48,13 @@ across mainland carriers. Diagnose separately:
    a route reachable from those networks. This requires a domain, hosting
    and network permissions; changing frontend code or users' DNS alone
    cannot guarantee a reliable China-wide route.
+
+The server currently reports only one ready Cloudflare connection and repeated
+QUIC timeouts. A separate HTTP/2 probe also reached only one of several
+Cloudflare edge IPs on TCP 7844. Work with the server/network administrator to
+allow reliable outbound TCP and UDP 7844 to Cloudflare Tunnel ranges, or move
+the tunnel to a network with reliable egress. A client VPN alone cannot fix
+this server-to-edge path.
 
 The UI estimate is based on one previous workload (~40 minutes with the old
 unsharded sequence scoring) and an isolated AF/SE sharding comparison. It is
