@@ -16,7 +16,7 @@ class JobQueue:
     ) -> None:
         self.worker = worker
         configured_workers = workers or int(os.getenv("ASTK_WORKERS", "1"))
-        configured_limit = max_concurrent_jobs or int(os.getenv("ASTK_MAX_CONCURRENT_JOBS", "10"))
+        configured_limit = max_concurrent_jobs or int(os.getenv("ASTK_MAX_CONCURRENT_JOBS", "3"))
         self.max_concurrent_jobs = max(1, configured_limit)
         self.workers = min(max(1, configured_workers), self.max_concurrent_jobs)
         self.pending: queue.Queue[str] = queue.Queue()

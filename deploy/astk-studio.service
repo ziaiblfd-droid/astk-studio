@@ -12,8 +12,9 @@ Environment=ASTK_DATA_ROOT=/home/yushiye/astk-web/data
 Environment=ASTK_STUDIO_DIR=/home/yushiye/astk-web/current
 Environment=ASTK_EXECUTION_MODE=command
 Environment=ASTK_ENGINE=auto
-Environment=ASTK_WORKERS=10
-Environment=ASTK_MAX_CONCURRENT_JOBS=10
+Environment=ASTK_WORKERS=3
+Environment=ASTK_MAX_CONCURRENT_JOBS=3
+Environment=ASTK_SEQUENCE_WORKERS=8
 Environment=ASTK_RETENTION_DAYS=1
 Environment=ASTK_CLEANUP_INTERVAL=3600
 Environment=ASTK_MAX_UPLOAD_BYTES=536870912

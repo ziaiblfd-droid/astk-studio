@@ -33,3 +33,19 @@ length is already log-scaled by `getlen --scale log`; the website does not
 apply the script's additional `vcmp -log` (which would log-transform it twice).
 Previously completed jobs retain their original figures; rerun the analysis
 to obtain the revised condition-level plots.
+
+## Execution and resources
+
+The queue runs at most three jobs concurrently. A sequence-feature job runs
+up to eight extraction or comparison commands in parallel (configurable via
+`ASTK_SEQUENCE_WORKERS`, capped at eight). For each event class it extracts
+sequence-derived values once from the union of the selected event IDs across
+conditions, then writes the same per-condition high/low CSV values and figures
+from that shared job-local catalog. The temporary catalog is removed after
+the feature stage. This cache is per job: it does not share results between
+different users' jobs or assume the genome reference is unchanged.
+
+`summary.json` records the sequence-stage elapsed time and per-command
+timings. During extraction, figure generation, and comparison the job's
+stage/progress is updated. More RAM does not accelerate an idle server; tune
+the parallel limit downward if concurrent jobs cause memory or disk pressure.

@@ -17,7 +17,7 @@ from backend.native_astk import canonicalize_native_outputs
 from backend.planner import InputError, native_comparison_label, prepare_job, safe_extract_zip
 from backend.result_parser import parse_results, read_event_ids
 from backend.runner import _runner_args, run_job
-from backend.sequence_features import _compare_features, _condition_sources, _filter_psi, _run_feature, run_sequence_features
+from backend.sequence_features import _compare_features, _condition_sources, _filter_psi, _render_feature, _run_feature, _split_cached_feature, run_sequence_features
 from backend.server import resolve_public_file, validate_analysis_files
 from backend.upload_store import UploadError, UploadStore
 from backend.store import JobStore
@@ -87,14 +87,63 @@ class PipelineTests(unittest.TestCase):
             fasta.write_text(">chr1\nACGT\n", encoding="utf-8")
             plan = {"reference": {"fasta": str(fasta)}, "comparisons": comparisons, "psi_high_threshold": 0.8, "psi_low_threshold": 0.2}
             with patch("backend.sequence_features._run_feature", return_value=["plot.png"]) as feature, patch(
+                "backend.sequence_features._split_cached_feature"
+            ), patch(
                 "backend.sequence_features._compare_features", return_value=[]
             ) as compare:
                 summary = run_sequence_features(root, plan, root / "runner.log")
             self.assertEqual(summary["selection_mode"], "condition_mean_all_events")
             self.assertEqual(summary["selected_events"], 3)
             self.assertEqual(len(summary["groups"]), 6)
-            self.assertEqual(feature.call_count, 12)
+            self.assertEqual(feature.call_count, 4)
             self.assertEqual(compare.call_count, 3)
+
+    def test_cached_feature_preserves_selected_event_values(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            output = root / "output" / "sequence_features"
+            catalog = root / "catalog"
+            catalog.mkdir()
+            (catalog / "gcc.csv").write_text(
+                "event_id,A1_5SS_exon_b0,A1_5SS_intron_b1\n"
+                "e1,0.41,0.52\n"
+                "e2,0.63,0.48\n"
+                "e3,0.57,0.31\n",
+                encoding="utf-8",
+            )
+            members = [
+                {"group": "11.5", "kind": "A3", "stratum": "high", "selected_events": 2, "outputs": {}},
+                {"group": "12.5", "kind": "A3", "stratum": "low", "selected_events": 1, "outputs": {}},
+            ]
+            psi = output / "psi"
+            psi.mkdir(parents=True)
+            (psi / "11.5_A3_high.psi").write_text("event_id\tsample\ne1\t0.9\ne3\t0.8\n", encoding="utf-8")
+            (psi / "12.5_A3_low.psi").write_text("event_id\tsample\ne2\t0.1\n", encoding="utf-8")
+            with patch("backend.sequence_features._render_feature", side_effect=lambda _, __, path: path.write_bytes(b"png")):
+                _split_cached_feature("gc_comparison", catalog, output, root, members)
+            high = (output / "gc_comparison" / "11.5_A3_high" / "gcc.csv").read_text(encoding="utf-8")
+            low = (output / "gc_comparison" / "12.5_A3_low" / "gcc.csv").read_text(encoding="utf-8")
+            self.assertIn("e1,0.41,0.52", high)
+            self.assertIn("e3,0.57,0.31", high)
+            self.assertNotIn("e2", high)
+            self.assertIn("e2,0.63,0.48", low)
+            self.assertTrue(members[0]["outputs"]["gc_comparison"][1].endswith("gcc.png"))
+
+    def test_cached_feature_renders_each_plot(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            tables = {
+                "splice_score": "event_id,A1_5SS,A2_3SS\ne1,6.2,8.1\ne2,5.1,7.3\n",
+                "gc": "event_id,A1_5SS_exon_b-1,A1_5SS_exon_b0,A1_5SS_intron_b1,A1_5SS_intron_b2\n"
+                      "e1,0.4,0.5,0.6,0.7\ne2,0.5,0.6,0.4,0.5\n",
+                "element_length": "event_id,0,1\ne1,7.1,8.2\ne2,6.1,9.2\n",
+            }
+            for feature, text in tables.items():
+                table = root / f"{feature}.csv"
+                figure = root / f"{feature}.png"
+                table.write_text(text, encoding="utf-8")
+                _render_feature(feature, table, figure)
+                self.assertGreater(figure.stat().st_size, 1000)
 
     def test_gc_extraction_keeps_profile_and_comparison_windows(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

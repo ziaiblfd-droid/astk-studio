@@ -6,6 +6,11 @@ import math
 import os
 import shlex
 import subprocess
+import tempfile
+import time
+from collections import defaultdict
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from contextlib import ExitStack
 from pathlib import Path
 from typing import Any
 
@@ -197,6 +202,112 @@ def _compare_features(
     return comparisons
 
 
+def _render_feature(feature: str, table: Path, figure: Path) -> None:
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    import pandas as pd
+
+    data = pd.read_csv(table, index_col=0)
+    if data.empty:
+        raise ValueError(f"Empty cached feature table: {table}")
+    if feature == "splice_score":
+        ax = data.plot.box()
+        ax.get_figure().savefig(figure)
+        plt.close(ax.get_figure())
+    elif feature in {"gc", "gc_comparison"}:
+        sites: dict[str, list[str]] = defaultdict(list)
+        for column in data.columns:
+            sites["_".join(column.split("_", 2)[:2])].append(column)
+        fig, axes = plt.subplots(1, len(sites), figsize=(10, 5))
+        for ax, columns in zip(axes if len(sites) > 1 else [axes], sites.values()):
+            means = data[columns].mean(axis=0)
+            up_width = len(columns) // 2
+            ax.plot(range(-up_width, len(columns) - up_width), means)
+            ax.set_ylim([min(0.35, means.min()), max(0.65, means.max())])
+        fig.tight_layout()
+        fig.savefig(figure)
+        plt.close(fig)
+    else:
+        fig, axes = plt.subplots(1, data.shape[1], sharey=True)
+        for ax, column in zip(axes if data.shape[1] > 1 else [axes], data.columns):
+            ax.boxplot(data[column].dropna())
+            ax.set_ylabel("log2(length)")
+        fig.tight_layout()
+        fig.savefig(figure)
+        plt.close(fig)
+
+
+def _split_cached_feature(
+    feature: str,
+    catalog: Path,
+    output_root: Path,
+    job_dir: Path,
+    members: list[dict[str, Any]],
+) -> None:
+    filenames = {
+        "splice_score": ("splice_scores.csv", "splice_scores_box.png"),
+        "gc": ("gcc.csv", "gcc.png"),
+        "gc_comparison": ("gcc.csv", "gcc.png"),
+        "element_length": ("element_len.csv", "element_len.png"),
+    }
+    name, figure_name = filenames[feature]
+    with ExitStack() as stack, (catalog / name).open("r", encoding="utf-8", newline="") as source:
+        reader = csv.reader(source)
+        header = next(reader)
+        writers: list[tuple[set[str], Any, dict[str, Any], Path]] = []
+        for item in members:
+            destination = output_root / feature / f"{filename_token(item['group'])}_{item['kind']}_{item['stratum']}"
+            destination.mkdir(parents=True, exist_ok=True)
+            handle = stack.enter_context((destination / name).open("w", encoding="utf-8", newline=""))
+            writer = csv.writer(handle)
+            writer.writerow(header)
+            with (output_root / "psi" / f"{filename_token(item['group'])}_{item['kind']}_{item['stratum']}.psi").open(
+                "r", encoding="utf-8", newline=""
+            ) as psi_handle:
+                ids = {row[0] for row in list(csv.reader(psi_handle, delimiter="\t"))[1:]}
+            writers.append((ids, writer, item, destination))
+        counts = [0] * len(writers)
+        for row in reader:
+            if not row:
+                continue
+            for index, (ids, writer, _, _) in enumerate(writers):
+                if row[0] in ids:
+                    writer.writerow(row)
+                    counts[index] += 1
+    for count, (_, _, item, destination) in zip(counts, writers):
+        if count != item["selected_events"]:
+            raise ValueError(f"Cached {feature} row count mismatch for {item['group']}/{item['kind']}/{item['stratum']}")
+        _render_feature(feature, destination / name, destination / figure_name)
+        item["outputs"][feature] = [
+            (destination / filename).relative_to(job_dir).as_posix() for filename in (name, figure_name)
+        ]
+
+
+def _progress(job_dir: Path, stage: str, progress: int) -> None:
+    if not (job_dir / "job.json").is_file():
+        return
+    from .store import JobStore
+    JobStore(job_dir.parent).update(job_dir.name, stage=stage, progress=progress)
+
+
+def _timed_feature(feature: str, psi: Path, destination: Path, fasta: Path, job_dir: Path) -> tuple[list[str], float]:
+    started = time.monotonic()
+    lines: list[str] = []
+    _run_feature(feature, psi, destination, fasta, job_dir, lines)
+    return lines, time.monotonic() - started
+
+
+def _timed_comparison(
+    job_dir: Path, output_root: Path, group: str, kind: str,
+    high: dict[str, Any], low: dict[str, Any],
+) -> tuple[list[dict[str, Any]], list[str], float]:
+    started = time.monotonic()
+    lines: list[str] = []
+    comparisons = _compare_features(job_dir, output_root, group, kind, high, low, lines)
+    return comparisons, lines, time.monotonic() - started
+
+
 def run_sequence_features(job_dir: Path, plan: dict[str, Any], log_path: Path) -> dict[str, Any]:
     output_root = job_dir / "output" / "sequence_features"
     psi_root = output_root / "psi"
@@ -210,24 +321,42 @@ def run_sequence_features(job_dir: Path, plan: dict[str, Any], log_path: Path) -
     if not fasta.exists():
         raise RuntimeError(f"Sequence feature FASTA does not exist: {fasta}")
 
+    started = time.monotonic()
     log: list[str] = ["=== SEQUENCE FEATURES ===", f"FASTA: {fasta}"]
     high_threshold = float(plan.get("psi_high_threshold", 0.8))
     low_threshold = float(plan.get("psi_low_threshold", 0.2))
     groups: list[dict[str, Any]] = []
     feature_comparisons: list[dict[str, Any]] = []
+    timings: dict[str, Any] = {"extraction_seconds": {}, "comparison_seconds": {}}
+    workers = max(1, min(8, int(os.getenv("ASTK_SEQUENCE_WORKERS", "8"))))
+    features = ("splice_score", "gc", "gc_comparison", "element_length")
     conditions = _condition_sources(analysis_dir, plan.get("comparisons", []))
+    members_by_kind: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    catalog_rows: dict[str, dict[str, list[str]]] = defaultdict(dict)
+    _progress(job_dir, "Sequence features: selecting events", 72)
     for group, sources in conditions.items():
         stage_key = filename_token(group)
         for kind, source in sources.items():
-            strata: dict[str, dict[str, Any]] = {}
-            for stratum, high in (("high", True), ("low", False)):
+            header, source_rows = _read_table(source)
+            selected_rows: dict[str, list[list[str]]] = {"high": [], "low": []}
+            for row in source_rows:
+                if len(row) != len(header) or not all(_is_number(value) for value in row[1:]):
+                    continue
+                mean_psi = sum(float(value) for value in row[1:]) / (len(row) - 1)
+                if mean_psi >= high_threshold:
+                    selected_rows["high"].append(row)
+                if mean_psi <= low_threshold:
+                    selected_rows["low"].append(row)
+            for stratum in STRATA:
                 psi_path = psi_root / f"{stage_key}_{kind}_{stratum}.psi"
-                selected = _filter_psi(
-                    source,
-                    psi_path,
-                    high,
-                    high_threshold if high else low_threshold,
-                )
+                rows = selected_rows[stratum]
+                selected = len(rows)
+                if selected:
+                    psi_root.mkdir(parents=True, exist_ok=True)
+                    with psi_path.open("w", encoding="utf-8", newline="") as handle:
+                        writer = csv.writer(handle, delimiter="\t", lineterminator="\n")
+                        writer.writerow(header)
+                        writer.writerows(rows)
                 item: dict[str, Any] = {
                     "group": group,
                     "kind": kind,
@@ -237,19 +366,82 @@ def run_sequence_features(job_dir: Path, plan: dict[str, Any], log_path: Path) -
                     "outputs": {},
                 }
                 if selected:
-                    for feature in ("splice_score", "gc", "gc_comparison", "element_length"):
-                        try:
-                            files = _run_feature(feature, psi_path, output_root / feature / f"{stage_key}_{kind}_{stratum}", fasta, job_dir, log)
-                            item["outputs"][feature] = files
-                        except Exception as error:
-                            item["status"] = "failed"
-                            item.setdefault("errors", {})[feature] = str(error)
-                            log.append(f"{feature} failed for {group}/{kind}/{stratum}: {error}")
+                    members_by_kind[kind].append(item)
+                    for row in rows:
+                        catalog_rows[kind].setdefault(row[0], row)
                 groups.append(item)
-                strata[stratum] = item
-            feature_comparisons.extend(
-                _compare_features(job_dir, output_root, group, kind, strata["high"], strata["low"], log, stage_key)
-            )
+
+    def write_log(lines: list[str]) -> None:
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        with log_path.open("a", encoding="utf-8") as handle:
+            handle.write("\n".join(lines) + "\n")
+
+    write_log(log)
+    tasks: list[tuple[str, str]] = []
+    with tempfile.TemporaryDirectory(prefix=".sequence-cache-", dir=job_dir) as temporary:
+        cache_root = Path(temporary)
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            pending = {}
+            for kind, rows in catalog_rows.items():
+                catalog = cache_root / kind
+                catalog.mkdir()
+                psi = catalog / f"{kind}.psi"
+                with psi.open("w", encoding="utf-8", newline="") as handle:
+                    writer = csv.writer(handle, delimiter="\t", lineterminator="\n")
+                    writer.writerow(["event_id", "sample"])
+                    writer.writerows([row[0], row[1]] for row in rows.values())
+                for feature in features:
+                    tasks.append((kind, feature))
+                    destination = catalog / feature
+                    pending[pool.submit(_timed_feature, feature, psi, destination, fasta, job_dir)] = (kind, feature)
+            failed: set[tuple[str, str]] = set()
+            for future in as_completed(pending):
+                kind, feature = pending[future]
+                try:
+                    lines, seconds = future.result()
+                    timings["extraction_seconds"][f"{kind}/{feature}"] = round(seconds, 3)
+                    write_log([*lines, f"TIMING extraction {kind}/{feature}: {seconds:.3f}s"])
+                except Exception as error:
+                    failed.add((kind, feature))
+                    write_log([f"Extraction failed for {kind}/{feature}: {error}"])
+                done = len(timings["extraction_seconds"]) + len(failed)
+                _progress(job_dir, f"Sequence features: extracting {done}/{len(tasks)}", 72 + int(13 * done / len(tasks)))
+
+        for kind_index, (kind, members) in enumerate(members_by_kind.items(), 1):
+            for feature in features:
+                if (kind, feature) in failed:
+                    error = f"Shared {feature} extraction failed for {kind}"
+                else:
+                    try:
+                        _split_cached_feature(feature, cache_root / kind / feature, output_root, job_dir, members)
+                        continue
+                    except Exception as exc:
+                        error = str(exc)
+                for item in members:
+                    item["status"] = "failed"
+                    item.setdefault("errors", {})[feature] = error
+                write_log([f"Cached feature failed for {kind}/{feature}: {error}"])
+            _progress(job_dir, f"Sequence features: figures {kind}", 85 + int(5 * kind_index / len(members_by_kind)))
+
+    by_group_kind: dict[tuple[str, str], dict[str, dict[str, Any]]] = defaultdict(dict)
+    for item in groups:
+        by_group_kind[(item["group"], item["kind"])][item["stratum"]] = item
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        pending = {
+            pool.submit(_timed_comparison, job_dir, output_root, group, kind, strata["high"], strata["low"]): (group, kind)
+            for (group, kind), strata in by_group_kind.items()
+        }
+        for index, future in enumerate(as_completed(pending), 1):
+            group, kind = pending[future]
+            try:
+                results, lines, seconds = future.result()
+                feature_comparisons.extend(results)
+                timings["comparison_seconds"][f"{group}/{kind}"] = round(seconds, 3)
+                write_log([*lines, f"TIMING comparison {group}/{kind}: {seconds:.3f}s"])
+            except Exception as error:
+                write_log([f"Comparison failed for {group}/{kind}: {error}"])
+            _progress(job_dir, f"Sequence features: comparisons {index}/{len(pending)}", 90 + int(5 * index / len(pending)))
+    feature_comparisons.sort(key=lambda item: (item["group"], EVENT_TYPES.index(item["kind"]), item["feature"]))
 
     summary = {
         "enabled": True,
@@ -263,9 +455,12 @@ def run_sequence_features(job_dir: Path, plan: dict[str, Any], log_path: Path) -
         "selected_events": sum(int(item["selected_events"]) for item in groups),
         "failed": sum(item["status"] == "failed" for item in groups)
         + sum(item["status"] == "failed" for item in feature_comparisons),
+        "execution": {
+            "parallel_limit": workers,
+            "elapsed_seconds": round(time.monotonic() - started, 3),
+            **timings,
+        },
     }
     (output_root / "summary.json").write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
-    log_path.parent.mkdir(parents=True, exist_ok=True)
-    with log_path.open("a", encoding="utf-8") as handle:
-        handle.write("\n" + "\n".join(log) + "\n")
+    write_log([f"TIMING sequence features total: {summary['execution']['elapsed_seconds']}s"])
     return summary
