@@ -41,15 +41,18 @@ PUBLIC_FILES = {
     "/": ROOT / "index.html",
     "/index.html": ROOT / "index.html",
     "/app.js": ROOT / "app.js",
+    "/i18n.js": ROOT / "i18n.js",
+    "/assets/lucide.min.js": ROOT / "assets" / "lucide.min.js",
     "/styles.css": ROOT / "styles.css",
     "/responsive.css": ROOT / "responsive.css",
     "/github-pages.css": ROOT / "github-pages.css",
     "/sample-groups.css": ROOT / "sample-groups.css",
     "/results.css": ROOT / "results.css",
+    "/ui-enhancements.css": ROOT / "ui-enhancements.css",
     "/templates/samples.csv": ROOT / "templates" / "samples.csv",
 }
 MAX_UPLOAD_BYTES = int(os.getenv("ASTK_MAX_UPLOAD_BYTES", str(512 * 1024 * 1024)))
-UPLOAD_CHUNK_BYTES = int(os.getenv("ASTK_UPLOAD_CHUNK_BYTES", str(1024 * 1024)))
+UPLOAD_CHUNK_BYTES = int(os.getenv("ASTK_UPLOAD_CHUNK_BYTES", str(4 * 1024 * 1024)))
 UPLOAD_RETENTION_SECONDS = int(os.getenv("ASTK_UPLOAD_RETENTION_SECONDS", "86400"))
 MAX_UPLOAD_SESSIONS = int(os.getenv("ASTK_MAX_UPLOAD_SESSIONS", "20"))
 RETENTION_DAYS = float(os.getenv("ASTK_RETENTION_DAYS", "7"))

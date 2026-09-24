@@ -345,6 +345,8 @@ class PipelineTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             job_dir = self.make_job(Path(temporary))
             job = json.loads((job_dir / "job.json").read_text(encoding="utf-8"))
+            defaults = prepare_job(job_dir)
+            self.assertEqual((defaults["psi_high_threshold"], defaults["psi_low_threshold"]), (0.75, 0.25))
             job["config"]["psi_high_threshold"] = 0.75
             job["config"]["psi_low_threshold"] = 0.25
             (job_dir / "job.json").write_text(json.dumps(job), encoding="utf-8")

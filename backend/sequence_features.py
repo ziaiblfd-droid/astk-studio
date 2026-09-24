@@ -350,8 +350,8 @@ def run_sequence_features(job_dir: Path, plan: dict[str, Any], log_path: Path) -
 
     started = time.monotonic()
     log: list[str] = ["=== SEQUENCE FEATURES ===", f"FASTA: {fasta}"]
-    high_threshold = float(plan.get("psi_high_threshold", 0.8))
-    low_threshold = float(plan.get("psi_low_threshold", 0.2))
+    high_threshold = float(plan.get("psi_high_threshold", 0.75))
+    low_threshold = float(plan.get("psi_low_threshold", 0.25))
     groups: list[dict[str, Any]] = []
     feature_comparisons: list[dict[str, Any]] = []
     timings: dict[str, Any] = {"extraction_seconds": {}, "comparison_seconds": {}}

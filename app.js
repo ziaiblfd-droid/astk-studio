@@ -61,7 +61,7 @@ async function refreshSampleGroups(){
 }
 function renderFileList(files,state='已载入',removable=false) {const list=document.querySelector('#file-list');list.innerHTML='';files.forEach((file,index)=>{const name=typeof file==='string'?file:file.name;const size=typeof file==='string'?'':` · ${(file.size/1024/1024).toFixed(1)} MB`;const ext=name.split('.').pop().toUpperCase();const action=removable?`<button class="file-remove" type="button" data-file-index="${index}" title="删除 ${escapeHtml(name)}" aria-label="删除 ${escapeHtml(name)}"><i data-lucide="x"></i></button>`:`<span class="file-state"><i data-lucide="check"></i></span>`;list.insertAdjacentHTML('beforeend',`<div class="file-row"><div class="file-type ${ext==='CSV'?'csv':''}">${escapeHtml(ext)}</div><div class="file-info"><strong>${escapeHtml(name)}</strong><span>${escapeHtml(state)}${size}</span></div>${action}</div>`);});if(removable)list.querySelectorAll('.file-remove').forEach(button=>button.addEventListener('click',()=>{const index=Number(button.dataset.fileIndex);const removed=selectedFiles[index];selectedFiles.splice(index,1);renderFileList(selectedFiles,'已载入',true);void refreshSampleGroups();showToast(`已删除 ${removed.name}`);}));iconRefresh();}
 function validateSampleTable(){if(!sampleTable||!sampleTable.rows.length)throw new Error('样本分组表尚未读取，请重新上传 CSV');const groups=[...new Set(sampleTable.rows.map(sample=>sample.group.trim()).filter(Boolean))];if(groups.length<2)throw new Error('请至少设置两个样本分组');if(!groups.includes(baselineGroup))throw new Error('请选择一个对照分组');return groups;}
-function readPsiThresholds(){const high=Number(document.querySelector('input[aria-label="high psi threshold"]')?.value??0.8);const low=Number(document.querySelector('input[aria-label="low psi threshold"]')?.value??0.2);if(!Number.isFinite(high)||!Number.isFinite(low)||low<0||high>1||low>=high)throw new Error('请设置有效的 PSI 阈值：0 ≤ Low < High ≤ 1');return {high,low};}
+function readPsiThresholds(){const high=Number(document.querySelector('input[aria-label="high psi threshold"]')?.value??0.75);const low=Number(document.querySelector('input[aria-label="low psi threshold"]')?.value??0.25);if(!Number.isFinite(high)||!Number.isFinite(low)||low<0||high>1||low>=high)throw new Error('请设置有效的 PSI 阈值：0 ≤ Low < High ≤ 1');return {high,low};}
 function csvLine(values){return values.map(value=>{const text=String(value??'');return /[",\r\n]/.test(text)?`"${text.replaceAll('"','""')}"`:text;}).join(',');}
 function buildGroupedSampleFile(){if(!sampleTable)return sampleSheetFile;const lines=['sample_id,condition,quant_path,baseline'];sampleTable.rows.forEach(sample=>{lines.push(csvLine([sample.name,sample.group.trim(),sample.quantPath,String(sample.group.trim()===baselineGroup).toLowerCase()]));});return new File([`${lines.join('\n')}\n`],'samples.grouped.csv',{type:'text/csv'});}
 function submissionFiles(){const grouped=buildGroupedSampleFile();const files=selectedFiles.filter(file=>!file.name.toLowerCase().endsWith('.csv'));if(grouped)files.push(grouped);return files;}
@@ -69,7 +69,7 @@ function submissionFiles(){const grouped=buildGroupedSampleFile();const files=se
 function validateUpload(){const zipFiles=selectedFiles.filter(file=>file.name.toLowerCase().endsWith('.zip'));const sampleSheets=selectedFiles.filter(file=>file.name.toLowerCase().endsWith('.csv'));if(!selectedFiles.length)throw new Error('请先选择一个 quant.zip 和一个 CSV 样本表');if(zipFiles.length!==1)throw new Error('每个任务需要且只能上传一个 ZIP 数据包');if(sampleSheets.length!==1)throw new Error('请上传且只能上传一个 CSV 样本表');if(selectedFiles.length!==2)throw new Error('当前版本仅接收一个 ZIP 数据包和一个 CSV 样本表');validateSampleTable();}
 function formatDuration(job){const start=new Date(job.created_at);const end=new Date(job.updated_at);if(Number.isNaN(start.getTime())||Number.isNaN(end.getTime()))return '任务时间已记录';const seconds=Math.max(0,Math.round((end-start)/1000));const minutes=Math.floor(seconds/60);return `运行耗时 ${String(minutes).padStart(2,'0')}:${String(seconds%60).padStart(2,'0')}`;}
 function renderJobStages(job,results=null){const progress=Math.max(0,Math.min(100,Number(job.progress)||0));const figures=Object.values(results?.images||{}).reduce((sum,items)=>sum+items.length,0);const stages=[['Input validation',`${job.config?.files?.length||0} files · metadata validation`,10],['Event generation',`${job.config?.event_type||'ALL'} · seven event classes`,45],['PSI & differential splicing',results?`${Number(results.metrics.significant_events).toLocaleString()} significant events`:'ASTK differential analysis',85]];if(job.config?.sequence_features){const featureData=results?.sequence_features;stages.push(['Sequence features',featureData?`${Number(featureData.selected_events||0).toLocaleString()} high/low events`:'splice score · GC · length',95]);}stages.push(['Report generation',results?`${figures} figures · downloadable ZIP`:'results and figures',100]);document.querySelector('#stage-list').innerHTML=stages.map(([name,detail,threshold])=>{const done=job.status==='completed'||progress>=threshold;const active=!done&&job.status==='running';return `<div class="stage ${done?'done':''}"><span class="stage-icon"><i data-lucide="${done?'check':active?'loader-circle':'circle'}"></i></span><div><strong>${name}</strong><span>${escapeHtml(detail)}</span></div><time>${done?'DONE':active?'RUNNING':'WAITING'}</time></div>`;}).join('');iconRefresh();}
-function updateJobStatus(job,results=null){currentJobContext=job;const progress=Math.max(0,Math.min(100,Number(job.progress)||0));const statusTag=document.querySelector('.status-tag');const running=job.status==='queued'||job.status==='running';document.querySelector('#progress-fill').style.width=`${progress}%`;document.querySelector('#progress-value').textContent=`${progress}%`;document.querySelector('#progress-text').textContent=job.status==='completed'?'ASTK analysis complete':job.status==='failed'?(job.error||'ASTK analysis failed'):(job.stage||'Queued');document.querySelector('#run-duration').textContent=job.status==='completed'?formatDuration(job):'服务器任务';if(statusTag)statusTag.innerHTML=`<span></span> ${job.status==='completed'?'COMPLETED':job.status==='failed'?'FAILED':job.status==='queued'?'QUEUED':'RUNNING'}`;setRunLoader(running,job.status==='queued'?'任务已进入服务器队列':(job.stage||'ASTK 正在处理数据'));renderJobStages(job,results);updateDownloads();}
+function updateJobStatus(job,results=null){currentJobContext=job;const progress=Math.max(0,Math.min(100,Number(job.progress)||0));const statusTag=document.querySelector('.status-tag');const running=job.status==='queued'||job.status==='running';document.querySelector('#progress-label').textContent='分析进度';document.querySelector('#progress-fill').style.width=`${progress}%`;document.querySelector('#progress-value').textContent=`${progress}%`;document.querySelector('#progress-text').textContent=job.status==='completed'?'ASTK analysis complete':job.status==='failed'?(job.error||'ASTK analysis failed'):(job.stage||'Queued');document.querySelector('#run-duration').textContent=job.status==='completed'?formatDuration(job):'服务器任务';const estimate=document.querySelector('#run-estimate');estimate.textContent=running?(job.config?.sequence_features?'此次分析通常需要约 25–40 分钟，请耐心等待。':'此次分析通常需要约 10–20 分钟，请耐心等待。')+(job.status==='queued'?'排队时间另计。':'实际耗时随数据量和服务器负载变化。'):'';if(statusTag)statusTag.innerHTML=`<span></span> ${job.status==='completed'?'COMPLETED':job.status==='failed'?'FAILED':job.status==='queued'?'QUEUED':'RUNNING'}`;setRunLoader(running,job.status==='queued'?'任务已进入服务器队列':(job.stage||'ASTK 正在处理数据'));renderJobStages(job,results);updateDownloads();}
 async function detectBackend(){const status=document.querySelector('#engine-status');const dot=document.querySelector('.version-top .status-dot');const offlineLabel=window.location.hostname.endsWith('github.io')?'GitHub Pages 演示模式':'演示模式 · 后端未连接';try{const response=await fetch('/api/health',{cache:'no-store'});if(!response.ok)throw new Error('unavailable');const health=await response.json();backendAvailable=health.status==='ok';status.textContent=backendAvailable?'分析引擎在线':offlineLabel;dot.classList.toggle('demo-mode',!backendAvailable);}catch{backendAvailable=false;status.textContent=offlineLabel;dot.classList.add('demo-mode');}const demo=document.querySelector('.demo-pill');if(demo)demo.lastChild.textContent=backendAvailable?' Local analysis':' Static demo';}
 
 function makeBarChart(){
@@ -120,7 +120,19 @@ function bindUpload(){
   if(typeSelector)typeSelector.addEventListener('change',event=>{if(loadedResults)renderHeatmapImage(loadedResults,event.target.value);});
 }
 const uploadChunkRetries=4;
+const uploadConcurrency=3;
 function wait(milliseconds){return new Promise(resolve=>setTimeout(resolve,milliseconds));}
+function displayUploadProgress(uploaded,total,started,fileName){
+  const percent=Math.min(100,Math.round(uploaded/Math.max(1,total)*100));
+  const elapsed=(performance.now()-started)/1000;
+  const remaining=uploaded&&elapsed>2?Math.ceil((total-uploaded)/(uploaded/elapsed)/60):null;
+  document.querySelector('#progress-label').textContent='上传进度';
+  document.querySelector('#progress-fill').style.width=`${percent}%`;
+  document.querySelector('#progress-value').textContent=`${percent}%`;
+  document.querySelector('#progress-text').textContent=`${(uploaded/1048576).toFixed(1)} / ${(total/1048576).toFixed(1)} MB`;
+  document.querySelector('#run-estimate').textContent=remaining===null?'上传中，正在估算剩余时间':remaining>0?`上传预计还需约 ${remaining} 分钟（基于当前速度）`:'上传即将完成';
+  setRunLoader(true,`正在上传 ${fileName} · ${percent}%`);
+}
 async function responseError(response,fallback){try{const payload=await response.json();return payload.error||fallback;}catch{return fallback;}}
 async function uploadChunk(uploadId,fileIndex,chunkIndex,blob){
   let lastError=null;
@@ -143,18 +155,37 @@ async function createJob(){
   const chunkSize=Number(session.chunk_size)||1024*1024;
   const totalBytes=files.reduce((sum,file)=>sum+file.size,0);
   let uploadedBytes=0;
+  const started=performance.now();
+  const queue=[];
   for(let fileIndex=0;fileIndex<files.length;fileIndex++){
     const file=files[fileIndex];
     const chunks=Math.ceil(file.size/chunkSize);
     for(let chunkIndex=0;chunkIndex<chunks;chunkIndex++){
       const start=chunkIndex*chunkSize;
-      const blob=file.slice(start,Math.min(file.size,start+chunkSize));
-      const percent=Math.min(99,Math.round((uploadedBytes/Math.max(1,totalBytes))*100));
-      setRunLoader(true,`正在上传 ${file.name} · ${percent}%`);
-      await uploadChunk(session.id,fileIndex,chunkIndex,blob);
-      uploadedBytes+=blob.size;
+      queue.push({file,fileIndex,chunkIndex,start});
     }
   }
+  displayUploadProgress(0,totalBytes,started,files[0].name);
+  let next=0;
+  let failure=null;
+  async function worker(){
+    while(next<queue.length&&!failure){
+      const task=queue[next++];
+      const blob=task.file.slice(task.start,Math.min(task.file.size,task.start+chunkSize));
+      try{
+        await uploadChunk(session.id,task.fileIndex,task.chunkIndex,blob);
+        uploadedBytes+=blob.size;
+        displayUploadProgress(uploadedBytes,totalBytes,started,task.file.name);
+      }catch(error){failure=error;break;}
+    }
+  }
+  await Promise.all(Array.from({length:Math.min(uploadConcurrency,queue.length)},()=>worker()));
+  if(failure)throw failure;
+  document.querySelector('#progress-label').textContent='分析进度';
+  document.querySelector('#progress-value').textContent='0%';
+  document.querySelector('#progress-fill').style.width='0%';
+  document.querySelector('#progress-text').textContent='正在创建分析任务';
+  document.querySelector('#run-estimate').textContent='';
   setRunLoader(true,'上传完成，正在创建分析任务');
   return fetch('/api/jobs',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({upload_id:session.id,config})});
 }
@@ -205,7 +236,7 @@ function renderSequenceFeatures(results){
   if(!data.enabled){heading.hidden=true;panel.hidden=true;panel.innerHTML='';return;}
   const groups=Array.isArray(data.groups)?data.groups:[],comparisons=Array.isArray(data.comparisons)?data.comparisons:[];
   const groupNames=[...new Set(groups.map(item=>item.group))];
-  const statusText=data.failed?`${data.failed} 个分析或比对单元失败`:`${Number(data.completed||0)} 个分析单元完成 · ${comparisons.filter(item=>item.status==='completed').length} 张比对图`; const highCutoff=Number(data.high_threshold??0.8); const lowCutoff=Number(data.low_threshold??0.2);
+  const statusText=data.failed?`${data.failed} 个分析或比对单元失败`:`${Number(data.completed||0)} 个分析单元完成 · ${comparisons.filter(item=>item.status==='completed').length} 张比对图`; const highCutoff=Number(data.high_threshold??0.75); const lowCutoff=Number(data.low_threshold??0.25);
   const byCondition=data.selection_mode==='condition_mean_all_events';
   const note=byCondition?'High/Low 按每个时期或条件中全部有效样本的平均 PSI 筛选全部事件，与 ASTK pf 一致；总数为各条件和事件类型的筛选次数之和，并非去重事件数。High/Low 比对使用 Mann-Whitney 检验；GC 使用 150 bp 窗口按剪接位点分面。':'High/Low 表示显著事件在对照与处理的全部有效样本中 PSI 均达到当前阈值；组间高低切换的事件不会进入这两类。比对采用 Mann-Whitney 检验与 BH 校正；GC 比对先按剪接位点的外显子/内含子区域取平均。';
   panel.innerHTML=`<div class="sequence-summary"><div><span>状态</span><strong>${escapeHtml(statusText)}</strong></div><div><span>筛选事件</span><strong>${Number(data.selected_events||0).toLocaleString()}</strong></div><div><span>High / Low</span><strong>≥ ${highCutoff} / ≤ ${lowCutoff}</strong></div><div><span>参考 FASTA</span><strong>${escapeHtml(data.fasta||'服务器配置')}</strong></div></div><p class="sequence-note">${note}</p><div class="figure-toolbar"><div class="figure-fields"><label>${byCondition?'时期 / 条件':'比较组'}<select id="sequence-group">${groupNames.map(group=>`<option value="${escapeHtml(group)}">${escapeHtml(byCondition?group:comparisonDisplayName(results,group))}</option>`).join('')}</select></label><label>事件类型<select id="sequence-kind"></select></label><label>特征<select id="sequence-feature"><option value="splice_score">剪接位点强度</option><option value="gc">GC 含量</option><option value="element_length">元件长度</option></select></label><label>视图<select id="sequence-view"><option value="high">High PSI</option><option value="low">Low PSI</option><option value="comparison">High / Low 比对</option></select></label></div></div><div class="figure-heading"><div><h3 id="sequence-title">序列特征</h3><p id="sequence-description"></p></div><button class="more-button" type="button" title="放大图表" data-zoom-target="#sequence-image"><i data-lucide="maximize-2"></i></button></div><div class="figure-image" id="sequence-image"></div><div class="sequence-meta" id="sequence-meta"></div>`;

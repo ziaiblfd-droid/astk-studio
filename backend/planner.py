@@ -430,8 +430,8 @@ def prepare_job(job_dir: Path, require_reference: bool = False) -> dict[str, Any
     if require_reference and not gtf.exists():
         raise InputError(f"Reference GTF does not exist: {gtf}")
     sequence_features = bool(config.get("sequence_features", False))
-    psi_high_threshold = float(config.get("psi_high_threshold", 0.8))
-    psi_low_threshold = float(config.get("psi_low_threshold", 0.2))
+    psi_high_threshold = float(config.get("psi_high_threshold", 0.75))
+    psi_low_threshold = float(config.get("psi_low_threshold", 0.25))
     if not 0 <= psi_low_threshold < psi_high_threshold <= 1:
         raise InputError("PSI thresholds must satisfy 0 <= low < high <= 1")
     fasta_value = str(reference.get("fasta", "")).strip()

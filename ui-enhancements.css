@@ -1,0 +1,75 @@
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.language-picker select {
+  appearance: none;
+  min-width: 88px;
+  height: 32px;
+  padding: 0 24px 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: #fff;
+  color: var(--ink);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.language-picker {
+  position: relative;
+}
+
+.language-picker::after {
+  content: "";
+  position: absolute;
+  right: 10px;
+  top: 12px;
+  width: 6px;
+  height: 6px;
+  border-right: 1px solid var(--muted);
+  border-bottom: 1px solid var(--muted);
+  transform: rotate(45deg);
+  pointer-events: none;
+}
+
+.time-estimate {
+  min-height: 2.5em;
+  margin: 9px 0 0;
+  color: var(--green-dark);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.topbar-actions {
+  min-width: 0;
+}
+
+.hero-grid > *,
+.run-panel,
+.status-panel,
+.sample-group-panel {
+  min-width: 0;
+}
+
+.sample-group-hint {
+  overflow-wrap: anywhere;
+}
+
+.sample-table-wrap {
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+@media (max-width: 460px) {
+  .language-picker select {
+    min-width: 82px;
+  }
+}

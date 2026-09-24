@@ -5,7 +5,7 @@ It uses all event PSI values separately for each condition and event class,
 deduplicating a baseline reused in several comparisons. An event with finite
 PSI in every replicate is high when its mean within that condition is at least
 the user-selected high threshold, or low when its mean is at most the low
-threshold (defaults: 0.8 and 0.2). No dPSI significance filter is applied.
+threshold (defaults: 0.75 and 0.25). No dPSI significance filter is applied.
 The counts in the summary add strata across conditions and are not a count
 of unique event IDs. A changing event may appear in opposite strata at
 different conditions; the comparison plots compare high and low within one
