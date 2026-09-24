@@ -37,8 +37,8 @@ to obtain the revised condition-level plots.
 ## Execution and resources
 
 The queue runs at most three jobs concurrently. A sequence-feature job runs
-up to 16 extraction or comparison commands in parallel (configurable via
-`ASTK_SEQUENCE_WORKERS`, capped at 16). For each event class it extracts
+up to eight extraction or comparison commands in parallel (configurable via
+`ASTK_SEQUENCE_WORKERS`, capped at eight). For each event class it extracts
 sequence-derived values once from the union of the selected event IDs across
 conditions, then writes the same per-condition high/low CSV values and figures
 from that shared job-local catalog. The temporary catalog is removed after

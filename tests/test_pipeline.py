@@ -99,7 +99,7 @@ class PipelineTests(unittest.TestCase):
             self.assertEqual(len(summary["groups"]), 6)
             self.assertEqual(feature.call_count, 4)
             self.assertEqual(compare.call_count, 3)
-            self.assertEqual(summary["execution"]["parallel_limit"], 16)
+            self.assertEqual(summary["execution"]["parallel_limit"], 8)
 
     def test_cached_feature_preserves_selected_event_values(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
