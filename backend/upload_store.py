@@ -206,6 +206,10 @@ class UploadStore:
                     continue
                 try:
                     modified = datetime.fromtimestamp(directory.stat().st_mtime, tz=timezone.utc)
+                    parts = directory / "parts"
+                    if parts.is_dir():
+                        parts_modified = datetime.fromtimestamp(parts.stat().st_mtime, tz=timezone.utc)
+                        modified = max(modified, parts_modified)
                 except OSError:
                     continue
                 if modified >= cutoff:

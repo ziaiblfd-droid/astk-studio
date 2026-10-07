@@ -25,6 +25,14 @@ with credentials redacted, and upload session time (no patient/sample data).
 Compare Worker `/api/health` and tunnel `/api/health` from the affected network.
 Large repeated retries point to routing or transport problems, not scoring.
 
+## Backend cleanup
+
+Upload sessions and finished, unpinned analysis jobs are retained for 12 hours.
+The cleanup loop runs hourly, so removal occurs on the first sweep after the
+retention window. Queued/running and pinned jobs are excluded. Upload session
+age follows the most recent write to its parts directory, so active transfers
+are not expired based only on session creation time.
+
 ## Site availability
 
 The frontend is served from Cloudflare Workers Assets; the API passes through

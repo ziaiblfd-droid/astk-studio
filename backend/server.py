@@ -53,9 +53,9 @@ PUBLIC_FILES = {
 }
 MAX_UPLOAD_BYTES = int(os.getenv("ASTK_MAX_UPLOAD_BYTES", str(512 * 1024 * 1024)))
 UPLOAD_CHUNK_BYTES = int(os.getenv("ASTK_UPLOAD_CHUNK_BYTES", str(512 * 1024)))
-UPLOAD_RETENTION_SECONDS = int(os.getenv("ASTK_UPLOAD_RETENTION_SECONDS", "86400"))
+UPLOAD_RETENTION_SECONDS = int(os.getenv("ASTK_UPLOAD_RETENTION_SECONDS", str(12 * 60 * 60)))
 MAX_UPLOAD_SESSIONS = int(os.getenv("ASTK_MAX_UPLOAD_SESSIONS", "20"))
-RETENTION_DAYS = float(os.getenv("ASTK_RETENTION_DAYS", "7"))
+RETENTION_DAYS = float(os.getenv("ASTK_RETENTION_DAYS", "0.5"))
 CLEANUP_INTERVAL = max(60, int(os.getenv("ASTK_CLEANUP_INTERVAL", "3600")))
 TRUST_PROXY = os.getenv("ASTK_TRUST_PROXY", "0").lower() in {"1", "true", "yes"}
 JOB_QUEUE = JobQueue(lambda job_id: run_job(STORE, job_id))
