@@ -36,18 +36,26 @@ if queue.get("running") or queue.get("queued") or queue.get("inflight"):
     raise SystemExit(f"Refusing service restart with active jobs: {queue}")
 PY
   python3 - "$ROOT/data/uploads" <<'PY'
+import json
 import pathlib
 import sys
 import time
 
 root = pathlib.Path(sys.argv[1])
-recent = [
-    path.name
-    for path in root.glob("UPL-*")
-    if time.time() - path.stat().st_mtime < 3600
-]
-if recent:
-    raise SystemExit(f"Refusing service restart with recent upload sessions: {recent}")
+now = time.time()
+active = []
+for path in root.glob("UPL-*"):
+    try:
+        metadata = json.loads((path / "upload.json").read_text())
+        age = now - path.stat().st_mtime
+        expected = sum(int(item.get("chunks", 0)) for item in metadata.get("files", []))
+        received = len(list((path / "parts").glob("*.part")))
+    except (OSError, ValueError, TypeError):
+        continue
+    if age < 30 or (age < 3600 and received < expected):
+        active.append((path.name, round(age), received, expected))
+if active:
+    raise SystemExit(f"Refusing service restart with active upload sessions: {active}")
 PY
 }
 
