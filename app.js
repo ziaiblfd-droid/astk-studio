@@ -121,6 +121,7 @@ function bindUpload(){
 }
 const uploadChunkRetries=4;
 const uploadConcurrency=3;
+const uploadMaxConcurrency=4;
 const uploadChunkTimeout=90000;
 function wait(milliseconds){return new Promise(resolve=>setTimeout(resolve,milliseconds));}
 function displayUploadProgress(uploaded,total,started,fileName){
@@ -136,11 +137,12 @@ function displayUploadProgress(uploaded,total,started,fileName){
 }
 async function responseError(response,fallback){try{const payload=await response.json();return payload.error||fallback;}catch{return fallback;}}
 async function uploadChunk(uploadId,fileIndex,chunkIndex,blob,onRetry){
+  const started=performance.now();
   let lastError=null;
   for(let attempt=1;attempt<=uploadChunkRetries;attempt++){
     try{
       const response=await fetch(`/api/uploads/${encodeURIComponent(uploadId)}/files/${fileIndex}/chunks/${chunkIndex}`,{method:'POST',headers:{'content-type':'application/octet-stream'},body:blob,signal:AbortSignal.timeout(uploadChunkTimeout)});
-      if(response.ok)return;
+      if(response.ok)return (performance.now()-started)/1000;
       const message=await responseError(response,`分块 ${chunkIndex+1} 上传失败`);
       if(response.status>=400&&response.status<500&&response.status!==408&&response.status!==429){
         throw Object.assign(new Error(message),{retryable:false});
@@ -179,20 +181,30 @@ async function createJob(){
   displayUploadProgress(0,totalBytes,started,files[0].name);
   let next=0;
   let failure=null;
+  let active=0;
+  let concurrency=uploadConcurrency;
+  let fastChunks=0;
   async function worker(){
     while(next<queue.length&&!failure){
+      if(active>=concurrency){await wait(100);continue;}
       const task=queue[next++];
       const blob=task.file.slice(task.start,Math.min(task.file.size,task.start+chunkSize));
+      active++;
       try{
-        await uploadChunk(session.id,task.fileIndex,task.chunkIndex,blob,attempt=>{
+        const duration=await uploadChunk(session.id,task.fileIndex,task.chunkIndex,blob,attempt=>{
+          concurrency=Math.max(2,concurrency-1);
+          fastChunks=0;
           document.querySelector('#run-estimate').textContent=`网络不稳定，正在重试第 ${task.chunkIndex+1} 块（第 ${attempt}/${uploadChunkRetries} 次）`;
         });
+        fastChunks=duration<=20?fastChunks+1:0;
+        if(fastChunks>=6&&concurrency<uploadMaxConcurrency){concurrency++;fastChunks=0;}
         uploadedBytes+=blob.size;
         displayUploadProgress(uploadedBytes,totalBytes,started,task.file.name);
-      }catch(error){failure=error;break;}
+      }catch(error){failure=error;}
+      finally{active--;}
     }
   }
-  await Promise.all(Array.from({length:Math.min(uploadConcurrency,queue.length)},()=>worker()));
+  await Promise.all(Array.from({length:Math.min(uploadMaxConcurrency,queue.length)},()=>worker()));
   if(failure)throw failure;
   document.querySelector('#progress-label').textContent='分析进度';
   document.querySelector('#progress-value').textContent='0%';
