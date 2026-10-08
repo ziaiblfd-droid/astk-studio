@@ -1,6 +1,10 @@
 __pycache__/
 *.pyc
-data/jobs/
+data/
 .env
 dist/
 .streamlit/secrets.toml
+
+# Cloudflare deploy credentials (local only)
+scripts/.cf-token
+scripts/.cf-account

@@ -11,9 +11,11 @@
     <link rel="stylesheet" href="github-pages.css?v=20260918" />
     <link rel="stylesheet" href="sample-groups.css?v=20260921" />
     <link rel="stylesheet" href="results.css?v=20260923" />
+    <link rel="stylesheet" href="downstream.css?v=20261008" />
     <link rel="stylesheet" href="ui-enhancements.css?v=20260924" />
     <script src="i18n.js?v=20260924" defer></script>
     <script src="app.js?v=20260924" defer></script>
+    <script src="downstream.js?v=20261008" defer></script>
   </head>
   <body>
     <div class="app-shell">
@@ -32,6 +34,7 @@
           <button class="nav-item" data-view="events"><i data-lucide="table-2"></i><span>事件浏览器</span></button>
           <button class="nav-item" data-view="workflow"><i data-lucide="route"></i><span>分析流程</span></button>
           <button class="nav-item" data-view="library"><i data-lucide="library"></i><span>论文数据集</span></button>
+          <button class="nav-item" data-view="downstream"><i data-lucide="microscope"></i><span>富集分析</span></button>
         </nav>
 
         <div class="sidebar-divider"></div>
@@ -66,15 +69,6 @@
           <div class="hero-grid">
             <section class="panel run-panel">
               <div class="panel-heading"><div><div class="panel-kicker">01 / INPUT</div><h2>配置一次分析</h2></div><span class="saved-label"><i data-lucide="check-circle-2"></i>配置已保存</span></div>
-              <div class="form-grid">
-                <label class="field full"><span>数据来源</span><div class="select-wrap"><select id="data-source"><option>Salmon quant.sf · transcript TPM</option></select><i data-lucide="chevron-down"></i></div></label>
-                <label class="field"><span>物种</span><div class="select-wrap"><select id="species"><option>Mus musculus · mm10</option><option>Homo sapiens · hg38</option></select><i data-lucide="chevron-down"></i></div></label>
-                <label class="field"><span>实验设计</span><div class="select-wrap"><select id="design"><option>多时间点发育序列</option><option>两组比较</option><option>多组比较</option></select><i data-lucide="chevron-down"></i></div></label>
-                <label class="field"><span>参考注释</span><div class="select-wrap"><select><option>Gencode M25 · GTF</option><option>Gencode v44 · GTF</option><option>自定义注释文件</option></select><i data-lucide="chevron-down"></i></div></label>
-                <label class="field"><span>显著性阈值</span><div class="input-suffix"><input type="number" min="0" max="1" step="0.01" value="0.05" aria-label="p value threshold" /><span>p-value</span></div></label>
-                <label class="field"><span>最小变化幅度</span><div class="input-suffix"><input type="number" min="0" max="1" step="0.01" value="0" aria-label="absolute dpsi threshold" /><span>|dPSI|</span></div></label>
-                <label class="field full"><span>高低 PSI 定义</span><div class="psi-threshold-grid"><div class="input-suffix"><input type="number" min="0" max="1" step="0.01" value="0.75" aria-label="high psi threshold" /><span>High ≥</span></div><div class="input-suffix"><input type="number" min="0" max="1" step="0.01" value="0.25" aria-label="low psi threshold" /><span>Low ≤</span></div></div><small class="field-help">只影响序列特征模块的 High / Low 事件筛选。</small></label>
-              </div>
               <div class="upload-zone" id="upload-zone" tabindex="0">
                 <div class="upload-icon"><i data-lucide="upload-cloud"></i></div><div><strong>拖入 quant.zip 与 CSV 样本表</strong><span>CSV 文件名无需修改 · ZIP 内保留每个样本的 quant.sf 目录 · 单次最大 512 MB</span></div><button class="button mini" id="browse-files">选择文件</button><input type="file" id="file-input" multiple hidden accept=".zip,.csv" />
               </div>
@@ -92,6 +86,15 @@
                 </div>
                 <div class="sample-group-hint" id="sample-group-hint"></div>
               </div>
+              <div class="form-grid">
+                <label class="field full"><span>数据来源</span><div class="select-wrap"><select id="data-source"><option>Salmon quant.sf · transcript TPM</option></select><i data-lucide="chevron-down"></i></div></label>
+                <label class="field"><span>物种</span><div class="select-wrap"><select id="species"><option>Mus musculus · mm10</option><option>Homo sapiens · hg38</option></select><i data-lucide="chevron-down"></i></div></label>
+                <label class="field"><span>实验设计</span><div class="select-wrap"><select id="design"><option>多时间点发育序列</option><option>两组比较</option><option>多组比较</option></select><i data-lucide="chevron-down"></i></div></label>
+                <label class="field"><span>参考注释</span><div class="select-wrap"><select><option>Gencode M25 · GTF</option><option>Gencode v44 · GTF</option><option>自定义注释文件</option></select><i data-lucide="chevron-down"></i></div></label>
+                <label class="field"><span>显著性阈值</span><div class="input-suffix"><input type="number" min="0" max="1" step="0.01" value="0.05" aria-label="p value threshold" /><span>p-value</span></div></label>
+                <label class="field"><span>最小变化幅度</span><div class="input-suffix"><input type="number" min="0" max="1" step="0.01" value="0" aria-label="absolute dpsi threshold" /><span>|dPSI|</span></div></label>
+                <label class="field full"><span>高低 PSI 定义</span><div class="psi-threshold-grid"><div class="input-suffix"><input type="number" min="0" max="1" step="0.01" value="0.75" aria-label="high psi threshold" /><span>High ≥</span></div><div class="input-suffix"><input type="number" min="0" max="1" step="0.01" value="0.25" aria-label="low psi threshold" /><span>Low ≤</span></div></div><small class="field-help">只影响序列特征模块的 High / Low 事件筛选。</small></label>
+              </div>
               <div class="run-options"><label class="check-option"><input type="checkbox" checked /><span class="checkmark"></span><span>生成全部七类事件</span></label><label class="check-option"><input type="checkbox" checked /><span class="checkmark"></span><span>输出交互式报告</span></label><label class="check-option"><input type="checkbox" id="sequence-features" /><span class="checkmark"></span><span>运行序列特征模块</span></label></div>
               <a class="template-link" href="templates/samples.csv" download><i data-lucide="file-down"></i>下载 ASTK samples.csv 模板</a>
             </section>
@@ -103,6 +106,7 @@
               <div class="run-loader" id="run-loader" role="status" aria-live="polite"><span class="run-loader-spinner" aria-hidden="true"></span><div><strong id="run-loader-title">ASTK 正在分析</strong><span id="run-loader-text">任务已排队</span></div></div>
               <div class="stage-list" id="stage-list"><div class="stage done"><span class="stage-icon"><i data-lucide="check"></i></span><div><strong>Input validation</strong><span>6 files · metadata matched</span></div><time>00:14</time></div><div class="stage done"><span class="stage-icon"><i data-lucide="check"></i></span><div><strong>Event generation</strong><span>ALL · 7 event classes</span></div><time>02:08</time></div><div class="stage done"><span class="stage-icon"><i data-lucide="check"></i></span><div><strong>PSI & differential splicing</strong><span>1,824 significant events</span></div><time>05:51</time></div><div class="stage done"><span class="stage-icon"><i data-lucide="check"></i></span><div><strong>Report generation</strong><span>12 figures · 4 tables</span></div><time>00:29</time></div></div>
               <button class="report-link" id="download-report"><i data-lucide="file-down"></i>下载完整分析报告 <span>ZIP</span></button>
+              <div class="downstream-cta" id="downstream-cta" hidden><div class="downstream-cta-text"><strong>基础分析已完成</strong><span>可继续运行功能富集与 RBP motif 分析。</span></div><button class="button primary" id="downstream-cta-button"><i data-lucide="microscope"></i>继续富集分析</button></div>
             </section>
           </div>
 
@@ -129,9 +133,41 @@
 
         <section class="page-view" id="events-view"><div class="page-heading compact"><div><div class="eyebrow">EVENT EXPLORER</div><h1>事件浏览器</h1><p>在所有可变剪切事件中定位值得关注的基因与调控模式。</p></div><button class="button primary" id="export-events"><i data-lucide="download"></i>导出当前结果</button></div><section class="panel event-browser"><div class="event-toolbar"><div class="event-tabs" id="event-tabs"></div><div class="table-tools"><div class="search-field"><i data-lucide="search"></i><input id="event-search" placeholder="搜索 gene / event ID" /></div><select id="event-filter"><option value="all">全部显著性</option><option value="up">dPSI 上升</option><option value="down">dPSI 下降</option></select></div></div><div class="table-wrap"><table><thead><tr><th>Event ID</th><th>Gene</th><th>Type</th><th>Condition</th><th>PSI</th><th>ΔPSI</th><th>p-value</th><th></th></tr></thead><tbody id="events-table"></tbody></table></div><div class="table-footer"><span id="event-count">Showing 8 of 1,824 significant events</span><div class="pagination"><button class="page-button active">1</button><button class="page-button">2</button><button class="page-button">3</button><span>...</span><button class="page-button">Next <i data-lucide="chevron-right"></i></button></div></div></section></section>
 
-        <section class="page-view" id="workflow-view"><div class="page-heading compact"><div><div class="eyebrow">PIPELINE</div><h1>分析流程</h1><p>每一步都保留输入、输出和版本信息，便于复现与发表。</p></div></div><section class="workflow-board"><div class="workflow-node complete"><div class="workflow-number">01</div><div><strong>Input validation</strong><span>quant.sf / samples.csv</span></div><i data-lucide="check-circle-2"></i></div><div class="workflow-connector complete"></div><div class="workflow-node complete"><div class="workflow-number">02</div><div><strong>Event generation</strong><span>SUPPA2 · seven classes</span></div><i data-lucide="check-circle-2"></i></div><div class="workflow-connector complete"></div><div class="workflow-node complete"><div class="workflow-number">03</div><div><strong>PSI & dPSI</strong><span>empirical model · p &lt; 0.05</span></div><i data-lucide="check-circle-2"></i></div><div class="workflow-connector complete"></div><div class="workflow-node optional"><div class="workflow-number">04</div><div><strong>Sequence features</strong><span>splice score · GC · length</span></div><span class="optional-tag">OPTIONAL</span></div><div class="workflow-connector"></div><div class="workflow-node optional"><div class="workflow-number">05</div><div><strong>Epigenetic signals</strong><span>ATAC / ChIP bigWig</span></div><span class="optional-tag">OPTIONAL</span></div></section><section class="panel methods-panel" id="methods"><div class="panel-kicker">REPRODUCIBILITY</div><h2>固定版本，完整记录</h2><div class="methods-grid"><div><span>Splicing engine</span><strong>SUPPA2 2.4</strong></div><div><span>Runtime</span><strong>Python 3.12 · Pinned</strong></div><div><span>Statistical model</span><strong>Empirical</strong></div><div><span>Reference</span><strong>Configured server GTF</strong></div></div><button class="report-link"><i data-lucide="terminal"></i>查看完整运行命令 <span><i data-lucide="arrow-up-right"></i></span></button></section></section>
+        <section class="page-view" id="workflow-view"><div class="page-heading compact"><div><div class="eyebrow">PIPELINE</div><h1>分析流程</h1><p>每一步都保留输入、输出和版本信息，便于复现与发表。</p></div></div><section class="workflow-board"><div class="workflow-node complete"><div class="workflow-number">01</div><div><strong>Input validation</strong><span>quant.sf / samples.csv</span></div><i data-lucide="check-circle-2"></i></div><div class="workflow-connector complete"></div><div class="workflow-node complete"><div class="workflow-number">02</div><div><strong>Event generation</strong><span>SUPPA2 · seven classes</span></div><i data-lucide="check-circle-2"></i></div><div class="workflow-connector complete"></div><div class="workflow-node complete"><div class="workflow-number">03</div><div><strong>PSI & dPSI</strong><span>empirical model · p &lt; 0.05</span></div><i data-lucide="check-circle-2"></i></div><div class="workflow-connector complete"></div><div class="workflow-node optional"><div class="workflow-number">04</div><div><strong>Sequence features</strong><span>splice score · GC · length</span></div><span class="optional-tag">OPTIONAL</span></div><div class="workflow-connector"></div><div class="workflow-node optional"><div class="workflow-number">05</div><div><strong>Epigenetic signals</strong><span>ATAC / ChIP bigWig</span></div><span class="optional-tag">OPTIONAL</span></div></section><div class="workflow-board downstream-board"><div class="workflow-node optional"><div class="workflow-number">05</div><div><strong>Enrichment</strong><span>GO · KEGG functional enrichment</span></div><span class="optional-tag">DOWNSTREAM</span></div><div class="workflow-connector"></div><div class="workflow-node optional"><div class="workflow-number">06</div><div><strong>Motif</strong><span>16 splicing-related RBP motifs</span></div><span class="optional-tag">DOWNSTREAM</span></div></div>
+        <section class="panel methods-panel" id="methods"><div class="panel-kicker">REPRODUCIBILITY</div><h2>固定版本，完整记录</h2><div class="methods-grid"><div><span>Splicing engine</span><strong>SUPPA2 2.4</strong></div><div><span>Runtime</span><strong>Python 3.12 · Pinned</strong></div><div><span>Statistical model</span><strong>Empirical</strong></div><div><span>Reference</span><strong>Configured server GTF</strong></div></div><button class="report-link"><i data-lucide="terminal"></i>查看完整运行命令 <span><i data-lucide="arrow-up-right"></i></span></button></section></section>
 
         <section class="page-view" id="library-view"><div class="page-heading compact"><div><div class="eyebrow">PAPER DATASETS</div><h1>论文数据集</h1><p>从论文中的跨物种与发育数据开始探索 ASTK 的分析能力。</p></div><button class="button secondary"><i data-lucide="book-open"></i>阅读方法</button></div><div class="dataset-grid"><article class="dataset-card featured"><div class="dataset-top"><span class="dataset-tag">FEATURED</span><span>Mouse · ENCODE</span></div><h2>Heart development</h2><p>心脏 E11.5–P0 发育阶段的 RNA-seq、ATAC-seq 与 ChIP-seq 多组学数据。</p><div class="dataset-stats"><span><strong>7</strong> stages</span><span><strong>9</strong> epigenetic tracks</span><span><strong>42.8k</strong> events</span></div><button class="button primary full-button" id="load-heart">加载到工作台 <i data-lucide="arrow-right"></i></button></article><article class="dataset-card"><div class="dataset-top"><span class="dataset-tag blue-tag">COMPARISON</span><span>5 species</span></div><h2>Cross-species AS atlas</h2><p>人、小鼠、果蝇、线虫与拟南芥的七类事件分布与序列特征比较。</p><div class="dataset-stats"><span><strong>5</strong> organisms</span><span><strong>7</strong> event types</span></div><button class="button secondary full-button">浏览数据集 <i data-lucide="arrow-right"></i></button></article><article class="dataset-card"><div class="dataset-top"><span class="dataset-tag yellow-tag">MULTI-OMICS</span><span>Mouse forebrain</span></div><h2>Epigenetic regulation</h2><p>ATAC 与八种组蛋白修饰信号，展示不同事件类型的调控特征。</p><div class="dataset-stats"><span><strong>8</strong> histone marks</span><span><strong>6</strong> stages</span></div><button class="button secondary full-button">浏览数据集 <i data-lucide="arrow-right"></i></button></article></div></section>
+        <section class="page-view" id="downstream-view">
+          <div class="page-heading compact">
+            <div><div class="eyebrow">ENRICHMENT ANALYSIS</div><h1>富集分析</h1><p>基于基础分析的显著事件，继续进行功能富集与 RBP motif 分析。</p></div>
+            <button class="button secondary" id="downstream-refresh"><i data-lucide="refresh-cw"></i>刷新上下文</button>
+          </div>
+          <div class="downstream-context"><div class="downstream-notice warn" id="downstream-gate"><i data-lucide="info"></i><span>请先完成基础分析，然后再运行富集或 motif 分析。</span></div></div>
+          <div class="downstream-grid">
+            <section class="panel downstream-card" data-module="enrichment">
+              <div class="downstream-card-head"><div class="downstream-icon"><i data-lucide="network"></i></div><div><h2>功能富集分析</h2><span>GO · KEGG ENRICHMENT</span></div><span class="downstream-state" data-card-status>等待基础分析</span></div>
+              <p class="downstream-desc">对显著差异可变剪切事件对应的基因进行 GO 与 KEGG 功能富集，帮助理解事件背后的生物学过程与调控通路；背景为本次分析全部检测到的基因。</p>
+              <div class="downstream-params">
+                <label class="field"><span>基因集</span><div class="select-wrap"><select data-param="gene_set"><option value="significant">全部显著事件</option><option value="up">dPSI 上升事件</option><option value="down">dPSI 下降事件</option><option value="all">全部检测事件（背景）</option></select><i data-lucide="chevron-down"></i></div></label>
+                <label class="field"><span>数据库</span><div class="select-wrap"><select data-param="database"><option value="GO_BP">GO · 生物过程 (BP)</option><option value="GO_MF">GO · 分子功能 (MF)</option><option value="GO_CC">GO · 细胞组分 (CC)</option><option value="KEGG">KEGG 通路</option></select><i data-lucide="chevron-down"></i></div></label>
+                <label class="field"><span>p 值阈值</span><input data-param="pvalue" type="number" min="0" max="1" step="0.001" value="0.05" /></label>
+                <label class="field"><span>q 值阈值</span><input data-param="qvalue" type="number" min="0" max="1" step="0.001" value="0.05" /></label>
+              </div>
+              <div class="downstream-actions"><button class="button primary downstream-run" data-run="enrichment" disabled><i data-lucide="play"></i>运行富集分析</button><button class="button secondary downstream-preview" data-preview="enrichment"><i data-lucide="eye"></i>示例预览</button></div>
+              <div class="downstream-result" data-result="enrichment"></div>
+            </section>
+            <section class="panel downstream-card" data-module="motif">
+              <div class="downstream-card-head"><div class="downstream-icon"><i data-lucide="scan-search"></i></div><div><h2>Motif 分析</h2><span>RBP MOTIF ENRICHMENT</span></div><span class="downstream-state" data-card-status>等待基础分析</span></div>
+              <p class="downstream-desc">在指定事件类型的序列区域中扫描剪接相关 RBP 结合 motif 的富集，用于探索可变剪切事件的潜在调控因子。</p>
+              <div class="downstream-params">
+                <label class="field"><span>事件类型</span><div class="select-wrap"><select data-param="event_type"><option value="SE">SE · 外显子跳跃</option><option value="RI">RI · 内含子保留</option><option value="A3">A3 · 3' 可变剪接</option><option value="A5">A5 · 5' 可变剪接</option><option value="AF">AF · 首外显子可变</option><option value="AL">AL · 末外显子可变</option><option value="MX">MX · 互斥外显子</option></select><i data-lucide="chevron-down"></i></div></label>
+                <label class="field"><span>序列区域</span><div class="select-wrap"><select data-param="region"><option value="flank-200">侧翼 ±200 nt</option><option value="flank-500">侧翼 ±500 nt</option><option value="exon">外显子本体</option></select><i data-lucide="chevron-down"></i></div></label>
+              </div>
+              <div class="downstream-actions"><button class="button primary downstream-run" data-run="motif" disabled><i data-lucide="play"></i>运行 Motif 分析</button><button class="button secondary downstream-preview" data-preview="motif"><i data-lucide="eye"></i>示例预览</button></div>
+              <div class="downstream-result" data-result="motif"></div>
+            </section>
+          </div>
+        </section>
       </main>
     </div>
     <div class="toast" id="toast" role="status"><i data-lucide="check-circle-2"></i><span>分析任务已提交</span></div>

@@ -3,6 +3,7 @@ from __future__ import annotations
 import io
 import json
 import tempfile
+import threading
 import unittest
 import zipfile
 from datetime import datetime, timedelta, timezone
@@ -11,7 +12,7 @@ from unittest.mock import patch
 
 from backend.cleanup import cleanup_expired_jobs
 from backend.execute_suppa import read_tpm, validate_group, write_expression_matrix
-from backend.job_queue import recover_pending_jobs
+from backend.job_queue import JobQueue, recover_pending_jobs
 from backend.multipart import parse_multipart_stream
 from backend.native_astk import canonicalize_native_outputs
 from backend.planner import InputError, native_comparison_label, prepare_job, safe_extract_zip
@@ -280,7 +281,67 @@ class PipelineTests(unittest.TestCase):
                 observed.append(store.read("ASTK-REPORT")["status"])
             with patch("backend.runner._build_archive", side_effect=inspect_archive):
                 run_job(store, "ASTK-REPORT")
-            self.assertEqual(observed, ["running"])
+            self.assertEqual(observed, [])
+            self.assertEqual(store.read("ASTK-REPORT")["status"], "completed")
+            self.assertTrue((store.job_dir("ASTK-REPORT") / "astk-report.zip").is_file())
+
+    def test_duplicate_job_execution_does_not_clear_active_analysis(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            store = JobStore(Path(temporary))
+            store.create("ASTK-LOCK", {"demo": True})
+            entered = threading.Event()
+            release = threading.Event()
+
+            def wait_for_sibling(_seconds: float) -> None:
+                entered.set()
+                if not release.wait(timeout=5):
+                    raise TimeoutError("test worker was not released")
+
+            with patch("backend.runner.time.sleep", side_effect=wait_for_sibling):
+                first = threading.Thread(target=run_job, args=(store, "ASTK-LOCK"))
+                first.start()
+                try:
+                    self.assertTrue(entered.wait(timeout=5))
+                    active_file = (
+                        store.job_dir("ASTK-LOCK")
+                        / "output"
+                        / "analysis"
+                        / "native"
+                        / "ref"
+                        / "in-progress.ioe"
+                    )
+                    active_file.parent.mkdir(parents=True)
+                    active_file.write_text("in progress", encoding="utf-8")
+
+                    run_job(store, "ASTK-LOCK")
+
+                    self.assertEqual(active_file.read_text(encoding="utf-8"), "in progress")
+                    self.assertEqual(store.read("ASTK-LOCK")["status"], "running")
+                finally:
+                    release.set()
+                    first.join(timeout=5)
+                self.assertFalse(first.is_alive())
+                self.assertEqual(store.read("ASTK-LOCK")["status"], "completed")
+
+    def test_job_queue_rejects_duplicate_inflight_submissions(self) -> None:
+        started = threading.Event()
+        release = threading.Event()
+
+        def worker(_job_id: str) -> None:
+            started.set()
+            release.wait(timeout=5)
+
+        job_queue = JobQueue(worker, workers=1, max_concurrent_jobs=1)
+        try:
+            self.assertTrue(job_queue.submit("ASTK-QUEUE"))
+            self.assertTrue(started.wait(timeout=5))
+            self.assertFalse(job_queue.submit("ASTK-QUEUE"))
+            self.assertEqual(job_queue.stats()["inflight"], 1)
+        finally:
+            release.set()
+            job_queue.pending.join()
+        self.assertTrue(job_queue.submit("ASTK-QUEUE"))
+        job_queue.pending.join()
 
     def test_shell_runner_uses_bash_when_execute_bit_is_missing(self) -> None:
         self.assertEqual(
@@ -846,14 +907,17 @@ class PipelineTests(unittest.TestCase):
             submitted: list[str] = []
 
             class Queue:
-                def submit(self, job_id: str) -> None:
+                def submit(self, job_id: str) -> bool:
                     submitted.append(job_id)
+                    return True
 
             recovered = recover_pending_jobs(store, Queue())
 
             self.assertEqual(recovered, ["ASTK-QUEUED", "ASTK-RUNNING"])
             self.assertEqual(submitted, recovered)
-            self.assertEqual(store.read("ASTK-RUNNING")["status"], "queued")
+            running = store.read("ASTK-RUNNING")
+            self.assertEqual(running["status"], "queued")
+            self.assertEqual(running["recover_attempts"], 1)
 
     def test_cleanup_removes_only_expired_finished_jobs(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

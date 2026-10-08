@@ -7,10 +7,12 @@ STATE_ROOT="${ASTK_DEPLOY_STATE_ROOT:-$HOME/astk-web/deployments}"
 STOP_TIMEOUT="${ASTK_STOP_TIMEOUT:-20}"
 HEALTH_TIMEOUT="${ASTK_HEALTH_TIMEOUT:-45}"
 ROLLBACK_ON_FAILURE="${ASTK_ROLLBACK_ON_FAILURE:-1}"
+SYSTEMD_UNIT="${ASTK_SYSTEMD_UNIT:-astk-studio.service}"
 CONDA_BASE="${CONDA_BASE:-$HOME/miniconda3}"
 CONDA_BIN="${ASTK_CONDA_BIN:-$CONDA_BASE/envs/astk/bin}"
 ASTK_MM10_GTF="${ASTK_MM10_GTF:-/home/yushiye/project/gencode.vM25.annotation.gtf}"
 ASTK_MM10_FASTA="${ASTK_MM10_FASTA:-/home/yushiye/project/GRCm38.primary_assembly.genome.fa}"
+SYSTEMD_MODE=0
 
 die() {
   echo "error: $*" >&2
@@ -67,12 +69,23 @@ wait_for_health() {
   return 1
 }
 
+if command -v systemctl >/dev/null 2>&1 \
+  && [[ "$(systemctl --user show "$SYSTEMD_UNIT" -p LoadState --value 2>/dev/null || true)" == "loaded" ]]; then
+  SYSTEMD_MODE=1
+  echo "Using user systemd unit: $SYSTEMD_UNIT"
+fi
+
 start_backend() {
   local app_dir="$1"
   local log_file="$2"
   local pid_file="$3"
 
   mkdir -p "$(dirname "$log_file")"
+  if [[ "$SYSTEMD_MODE" == "1" ]]; then
+    systemctl --user start "$SYSTEMD_UNIT"
+    systemctl --user show "$SYSTEMD_UNIT" -p MainPID --value >"$pid_file"
+    return 0
+  fi
   (
     cd "$app_dir"
     export PATH="$CONDA_BIN:$PATH"
@@ -93,7 +106,8 @@ start_backend() {
     export ASTK_SPLICE_SHARDS="${ASTK_SPLICE_SHARDS:-8}"
     export ASTK_JOB_TIMEOUT="21600"
     export ASTK_MAX_UPLOAD_BYTES="536870912"
-    export ASTK_RETENTION_DAYS="1"
+    export ASTK_RETENTION_DAYS="${ASTK_RETENTION_DAYS:-0.5}"
+    export ASTK_UPLOAD_RETENTION_SECONDS="${ASTK_UPLOAD_RETENTION_SECONDS:-43200}"
     export ASTK_CLEANUP_INTERVAL="3600"
     export PYTHONPATH="$app_dir"
     mkdir -p "$ASTK_DATA_ROOT/jobs"
@@ -114,8 +128,18 @@ if [[ -n "$old_pid" ]]; then
   printf '%s\n' "$old_cwd" >"$STATE_DIR/previous.cwd"
   printf '%s\n' "$old_log" >"$STATE_DIR/previous.log"
   tr '\0' '\n' <"/proc/$old_pid/environ" | grep '^ASTK_' | sort >"$STATE_DIR/previous.env" || true
-  echo "Stopping PID $old_pid from $old_cwd"
-  stop_pid "$old_pid" || die "PID $old_pid did not stop within ${STOP_TIMEOUT}s"
+  echo "Stopping existing backend from $old_cwd"
+  if [[ "$SYSTEMD_MODE" == "1" ]]; then
+    systemctl --user stop "$SYSTEMD_UNIT" || true
+    for _ in $(seq 1 "$STOP_TIMEOUT"); do
+      [[ -z "$(listener_pid "$PORT" || true)" ]] && break
+      sleep 1
+    done
+  fi
+  if [[ -n "$(listener_pid "$PORT" || true)" ]]; then
+    remaining_pid="$(listener_pid "$PORT" || true)"
+    stop_pid "$remaining_pid" || die "PID $remaining_pid did not stop within ${STOP_TIMEOUT}s"
+  fi
 fi
 
 if [[ -n "$(listener_pid "$PORT" || true)" ]]; then
@@ -140,7 +164,11 @@ fi
 
 echo "New release failed its health check on port $PORT." >&2
 tail -n 80 "$new_log" >&2 || true
-stop_pid "$new_pid" || true
+if [[ "$SYSTEMD_MODE" == "1" ]]; then
+  systemctl --user stop "$SYSTEMD_UNIT" || true
+else
+  stop_pid "$new_pid" || true
+fi
 
 if [[ "$ROLLBACK_ON_FAILURE" != "1" || -z "$old_pid" || -z "$old_cwd" ]]; then
   die "no automatic rollback was possible; deployment state is $STATE_DIR"
@@ -149,7 +177,12 @@ fi
 [[ -f "$old_cwd/scripts/run-conda-server.sh" ]] || die "previous release cannot be restarted automatically; state is $STATE_DIR"
 rollback_pid_file="$STATE_DIR/rollback.pid"
 rollback_log="${old_log:-$old_cwd/data/server.log}"
-start_backend "$old_cwd" "$rollback_log" "$rollback_pid_file"
+if [[ "$SYSTEMD_MODE" == "1" ]]; then
+  systemctl --user start "$SYSTEMD_UNIT"
+  systemctl --user show "$SYSTEMD_UNIT" -p MainPID --value >"$rollback_pid_file"
+else
+  start_backend "$old_cwd" "$rollback_log" "$rollback_pid_file"
+fi
 rollback_pid="$(cat "$rollback_pid_file")"
 
 if wait_for_health "$rollback_pid"; then

@@ -1,5 +1,9 @@
 # ASTK Studio 初版
 
+后端当前状态和部署入口见 [后端恢复与部署说明](docs/backend-recovery-20261007.md)。
+较早的生产快照见 [初版维护报告](docs/maintenance-report-2026-09-25.md)；
+本 README 的部分部署选项保留为早期方案，生产参数应重新核对。
+
 这是论文配套 ASTK Web 平台的第一版交互原型。当前版本已经包含轻量任务后端：
 
 - 任务配置与文件上传交互
@@ -48,7 +52,7 @@ py -3 backend/server.py
 - `GET /api/jobs/{id}/download`：下载结果 ZIP
 
 任务保存在 `data/jobs/{job_id}`，每个任务有独立的输入和输出目录。
-默认在任务完成或失败 7 天后自动删除整个任务目录，可通过
+默认在任务完成或失败 12 小时后自动删除整个任务目录，可通过
 `ASTK_RETENTION_DAYS` 和 `ASTK_CLEANUP_INTERVAL` 调整。
 
 输入规范见 [docs/input-format.md](docs/input-format.md)，示例表格位于 `templates/samples.csv`。

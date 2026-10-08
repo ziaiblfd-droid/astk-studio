@@ -20,6 +20,7 @@ from urllib.parse import unquote, urlparse
 if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
     from backend.cleanup import cleanup_expired_jobs
+    from backend.downstream import run_downstream
     from backend.job_queue import JobQueue, recover_pending_jobs
     from backend.multipart import MultipartError, parse_multipart_stream
     from backend.runner import run_job
@@ -27,6 +28,7 @@ if __package__ in (None, ""):
     from backend.upload_store import UploadError, UploadStore
 else:
     from .cleanup import cleanup_expired_jobs
+    from .downstream import run_downstream
     from .job_queue import JobQueue, recover_pending_jobs
     from .multipart import MultipartError, parse_multipart_stream
     from .runner import run_job
@@ -49,6 +51,8 @@ PUBLIC_FILES = {
     "/sample-groups.css": ROOT / "sample-groups.css",
     "/results.css": ROOT / "results.css",
     "/ui-enhancements.css": ROOT / "ui-enhancements.css",
+    "/downstream.css": ROOT / "downstream.css",
+    "/downstream.js": ROOT / "downstream.js",
     "/templates/samples.csv": ROOT / "templates" / "samples.csv",
 }
 MAX_UPLOAD_BYTES = int(os.getenv("ASTK_MAX_UPLOAD_BYTES", str(512 * 1024 * 1024)))
@@ -58,7 +62,16 @@ MAX_UPLOAD_SESSIONS = int(os.getenv("ASTK_MAX_UPLOAD_SESSIONS", "20"))
 RETENTION_DAYS = float(os.getenv("ASTK_RETENTION_DAYS", "0.5"))
 CLEANUP_INTERVAL = max(60, int(os.getenv("ASTK_CLEANUP_INTERVAL", "3600")))
 TRUST_PROXY = os.getenv("ASTK_TRUST_PROXY", "0").lower() in {"1", "true", "yes"}
-JOB_QUEUE = JobQueue(lambda job_id: run_job(STORE, job_id))
+def dispatch_job(job_id: str) -> None:
+    """Route a queued job to the primary runner or a downstream module."""
+    job = STORE.read(job_id) or {}
+    if (job.get("config") or {}).get("downstream"):
+        run_downstream(STORE, job_id)
+    else:
+        run_job(STORE, job_id)
+
+
+JOB_QUEUE = JobQueue(dispatch_job)
 UPLOADS = UploadStore(
     DATA_ROOT / "uploads",
     max_upload_bytes=MAX_UPLOAD_BYTES,
@@ -222,10 +235,47 @@ class ASTKHandler(SimpleHTTPRequestHandler):
                 int(chunk_match.group(3)),
             )
             return
+        downstream_match = re.fullmatch(r"/api/jobs/([^/]+)/downstream", parsed.path)
+        if downstream_match:
+            self.create_downstream_job(downstream_match.group(1))
+            return
         if parsed.path != "/api/jobs":
             self.send_json({"error": "Not found"}, 404)
             return
         self.create_job()
+
+    def create_downstream_job(self, parent_id: str) -> None:
+        try:
+            payload = self.read_json_body()
+            if not isinstance(payload, dict):
+                raise ValueError("Request must be a JSON object")
+            module = str(payload.get("module", "")).strip().lower()
+            if module not in ("enrichment", "motif"):
+                raise ValueError(f"Unsupported downstream module: {module or '(missing)'}")
+            params = payload.get("params") or {}
+            if not isinstance(params, dict):
+                raise ValueError("params must be a JSON object")
+            parent = STORE.read(parent_id)
+            if not parent:
+                self.send_json({"error": f"Parent job not found: {parent_id}"}, HTTPStatus.NOT_FOUND)
+                return
+            if parent.get("status") != "completed":
+                self.send_json(
+                    {"error": f"Parent job {parent_id} is not completed ({parent.get('status')})"},
+                    HTTPStatus.CONFLICT,
+                )
+                return
+            job_id = make_job_id()
+            config = {
+                "mode": "downstream",
+                "parent_job_id": parent_id,
+                "downstream": {"module": module, "params": params, "parent_job_id": parent_id},
+            }
+            created = STORE.create(job_id, config)
+            JOB_QUEUE.submit(job_id)
+            self.send_json(created or {"id": job_id, "status": "queued"}, HTTPStatus.ACCEPTED)
+        except (UnicodeDecodeError, ValueError, json.JSONDecodeError, OSError) as exc:
+            self.send_json({"error": f"Invalid downstream request: {exc}"}, HTTPStatus.BAD_REQUEST)
 
     def read_json_body(self, *, max_bytes: int = 1024 * 1024) -> object:
         try:

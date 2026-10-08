@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import errno
 import json
 import os
 import shlex
@@ -9,6 +10,16 @@ import time
 import zipfile
 from pathlib import Path
 from typing import Any
+
+try:  # POSIX advisory locking (the analysis server runs on Linux)
+    import fcntl
+except ImportError:  # pragma: no cover - Windows backend development
+    fcntl = None
+
+try:  # Windows byte-range locking
+    import msvcrt
+except ImportError:  # pragma: no cover - POSIX
+    msvcrt = None
 
 from .planner import prepare_job
 from .store import JobStore
@@ -70,10 +81,94 @@ def _build_archive(job_dir: Path) -> None:
         )
 
 
+class JobLock:
+    """Cross-process exclusive lock for a single job directory.
+
+    Two concurrent executions of the SAME job are catastrophic: at startup
+    ``run_job`` does ``shutil.rmtree(output/analysis)`` and
+    ``run_native_astk`` does ``shutil.rmtree(native)``. If a second execution
+    starts while a first is mid-run, that cleanup deletes the first run's
+    in-progress files, surfacing as
+    ``FileNotFoundError: .../output/analysis/native/tpm`` (or ``.../ref``)
+    from inside the SUPPA2 ``ds_flow`` engine.
+
+    The lock is taken non-blocking: if another execution (this process, another
+    worker thread, or a second server process) already holds it, ``acquired`` is
+    False and the caller must NOT touch the job directory.
+    """
+
+    def __init__(self, job_dir: Path) -> None:
+        self._handle = None
+        self.acquired = False
+        self.busy = False
+        self.error: OSError | None = None
+        try:
+            job_dir.mkdir(parents=True, exist_ok=True)
+            self._handle = (job_dir / ".run.lock").open("a+")
+            if fcntl is not None:
+                fcntl.flock(self._handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            elif msvcrt is not None:
+                self._handle.seek(0)
+                if self._handle.read(1) == "":
+                    self._handle.write("\0")
+                    self._handle.flush()
+                self._handle.seek(0)
+                msvcrt.locking(self._handle.fileno(), msvcrt.LK_NBLCK, 1)
+            self.acquired = True
+        except OSError as error:
+            self.error = error
+            self.busy = error.errno in {errno.EACCES, errno.EAGAIN, errno.EDEADLK}
+            if self._handle is not None:
+                self._handle.close()
+                self._handle = None
+
+    def release(self) -> None:
+        if self._handle is None:
+            return
+        try:
+            if fcntl is not None and self.acquired:
+                fcntl.flock(self._handle.fileno(), fcntl.LOCK_UN)
+            elif msvcrt is not None and self.acquired:
+                self._handle.seek(0)
+                msvcrt.locking(self._handle.fileno(), msvcrt.LK_UNLCK, 1)
+        except OSError:
+            pass
+        finally:
+            try:
+                self._handle.close()
+            except OSError:
+                pass
+            self._handle = None
+
+    def __enter__(self) -> "JobLock":
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        self.release()
+
+
 def run_job(store: JobStore, job_id: str) -> None:
     job_dir = store.job_dir(job_id)
     job = store.read(job_id)
     if job is None:
+        return
+    lock = JobLock(job_dir)
+    if not lock.acquired:
+        if lock.busy:
+            # A sibling execution of this same job is already running. Return
+            # without wiping output/analysis, which would delete its files.
+            return
+        error = lock.error or OSError("unknown job lock error")
+        store.update(
+            job_id,
+            status="failed",
+            stage="Could not acquire job lock",
+            error=f"Could not acquire job lock: {error}",
+        )
+        return
+    job = store.read(job_id)
+    if job is None or job.get("status") != "queued":
+        lock.release()
         return
     mode = os.getenv("ASTK_EXECUTION_MODE", "demo").lower()
     completed: list[dict[str, Any]] = []
@@ -106,6 +201,8 @@ def run_job(store: JobStore, job_id: str) -> None:
         with log_path.open("a", encoding="utf-8") as handle:
             handle.write(f"\nASTK Studio error: {exc}\n")
         store.update(job_id, status="failed", stage="Failed", error=str(exc))
+    finally:
+        lock.release()
 
 
 def _runner_args(command: str, platform: str | None = None) -> list[str]:
@@ -135,6 +232,8 @@ def _run_external(store: JobStore, job_id: str, job_dir: Path) -> None:
             handle.write(captured)
             handle.write("\n")
     if process.returncode != 0:
-        raise RuntimeError(f"SUPPA2 runner exited with code {process.returncode}")
+        detail = [line.strip() for line in captured.splitlines() if line.strip()]
+        suffix = f": {detail[-1]}" if detail else ""
+        raise RuntimeError(f"SUPPA2 runner exited with code {process.returncode}{suffix}")
     if not (job_dir / "output" / "results.json").exists():
         raise RuntimeError("SUPPA2 runner did not create output/results.json")
