@@ -250,11 +250,13 @@ class ASTKHandler(SimpleHTTPRequestHandler):
             if not isinstance(payload, dict):
                 raise ValueError("Request must be a JSON object")
             module = str(payload.get("module", "")).strip().lower()
-            if module not in ("enrichment", "motif"):
+            if module != "enrichment":
                 raise ValueError(f"Unsupported downstream module: {module or '(missing)'}")
             params = payload.get("params") or {}
             if not isinstance(params, dict):
                 raise ValueError("params must be a JSON object")
+            if str(params.get("mode") or "ora").strip().lower() not in {"ora", "compare"}:
+                raise ValueError("Unsupported enrichment mode")
             parent = STORE.read(parent_id)
             if not parent:
                 self.send_json({"error": f"Parent job not found: {parent_id}"}, HTTPStatus.NOT_FOUND)

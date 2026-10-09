@@ -1,4 +1,4 @@
-/* Downstream analysis module (enrichment / motif) — framework 2026-10-08 */
+/* Functional enrichment workspace */
 
 /* Entry CTA shown in the run-status panel once the base analysis completes */
 .downstream-cta {
@@ -40,15 +40,15 @@
 /* Module cards */
 .downstream-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
+  grid-template-columns: minmax(0, 1fr);
   gap: 18px;
 }
-.downstream-card { padding: 22px; display: flex; flex-direction: column; gap: 16px; }
+.downstream-card { padding: 0; display: flex; flex-direction: column; gap: 16px; min-width: 0; }
 .downstream-card-head { display: flex; align-items: center; gap: 14px; }
 .downstream-icon {
   width: 44px;
   height: 44px;
-  border-radius: 10px;
+  border-radius: 6px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -57,8 +57,8 @@
   flex-shrink: 0;
 }
 .downstream-icon svg { width: 22px; height: 22px; }
-.downstream-card-head h2 { font: 700 17px var(--display); margin: 0; letter-spacing: -0.02em; }
-.downstream-card-head span { display: block; font: 10px var(--mono); color: var(--muted); margin-top: 4px; letter-spacing: 0.04em; }
+.downstream-card-head h2 { font: 700 17px var(--display); margin: 0; letter-spacing: 0; }
+.downstream-card-head span { display: block; font: 10px var(--mono); color: var(--muted); margin-top: 4px; letter-spacing: 0; }
 .downstream-state {
   margin-left: auto;
   font: 500 9px var(--mono);
@@ -69,11 +69,9 @@
   white-space: nowrap;
 }
 .downstream-state.ready { background: var(--green-soft); color: var(--green-dark); }
-.downstream-desc { font-size: 12px; line-height: 1.7; color: var(--muted); margin: 0; }
 
 .downstream-params { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .downstream-run { align-self: flex-start; }
-.downstream-preview { align-self: flex-start; }
 .downstream-actions { display: flex; gap: 9px; align-items: center; flex-wrap: wrap; margin-top: 2px; }
 
 /* Status line while a downstream job runs */
@@ -93,23 +91,9 @@
 /* Result area */
 .downstream-result { display: flex; flex-direction: column; gap: 14px; }
 .downstream-result:empty { display: none; }
-.downstream-result.is-preview .downstream-figure img { filter: saturate(0.96); }
 
-.downstream-summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px; }
-.downstream-summary > div {
-  padding: 10px 12px;
-  border-radius: 6px;
-  background: #f7faf8;
-  border: 1px solid var(--line);
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-.downstream-summary span { font-size: 10px; color: var(--muted); }
-.downstream-summary strong { font: 600 14px var(--mono); color: #33473f; overflow-wrap: anywhere; }
-
-.downstream-figures { display: grid; grid-template-columns: 1fr; gap: 14px; }
-.downstream-figure { display: flex; flex-direction: column; gap: 6px; }
+.downstream-figures { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px; }
+.downstream-figure { display: flex; flex-direction: column; gap: 6px; margin: 0; min-width: 0; }
 .downstream-figure img {
   width: 100%;
   border-radius: 6px;
@@ -119,34 +103,29 @@
 }
 .downstream-figure span { font-size: 11px; color: var(--muted); }
 
-.downstream-table-wrap { max-width: 100%; overflow: auto; border: 1px solid var(--line); border-radius: 6px; }
-.downstream-table-wrap table { font-size: 11px; }
-.downstream-table-wrap th { padding: 10px 12px; }
-.downstream-table-wrap td { padding: 10px 12px; }
 
 .downstream-empty { color: var(--muted); font-size: 12px; padding: 14px 2px; }
 
-.downstream-downloads { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 4px; }
-.downstream-download { display: inline-flex; align-items: center; gap: 8px; text-decoration: none; }
-.downstream-download-icon { font: 600 14px var(--mono); line-height: 1; }
-
-.downstream-badge-sample {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  font: 500 9px var(--mono);
-  letter-spacing: 0.06em;
-  color: #9c731f;
-  background: #fff5d9;
-  border-radius: 3px;
-  padding: 4px 6px;
-  align-self: flex-start;
-}
-
 /* Pipeline board for downstream stages */
+.downstream-result[hidden], .downstream-run[hidden] { display: none; }
+.downstream-modes { display: flex; gap: 4px; border-bottom: 1px solid var(--line); padding-bottom: 12px; }
+.downstream-gallery-toolbar { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-end; padding: 12px 0; border-bottom: 1px solid var(--line); }
+.downstream-gallery-toolbar label { display: flex; flex-direction: column; gap: 6px; font-size: 11px; color: var(--muted); min-width: 0; max-width: 100%; }
+.downstream-gallery-toolbar select { width: 100%; max-width: 320px; height: 36px; padding: 6px 10px; border: 1px solid var(--line); border-radius: 4px; background: white; }
+.downstream-gallery-toolbar > a { margin-left: auto; }
+.downstream-gallery-toolbar [data-figure-count] { font: 12px var(--mono); color: var(--muted); padding-bottom: 10px; }
+.downstream-figure-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 36px; }
+.downstream-figure-head a { flex-shrink: 0; }
+.downstream-figure figcaption { font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
+.downstream-params .field, .downstream-params select, .downstream-params input { min-width: 0; max-width: 100%; }
+.downstream-params input { width: 100%; height: 38px; padding: 8px 12px; border: 1px solid var(--line); border-radius: 4px; background: white; font: 12px var(--mono); }
+.downstream-notice, .downstream-status { overflow-wrap: anywhere; }
 .workflow-board.downstream-board { grid-template-columns: 1fr 20px 1fr; margin-top: 18px; }
 
 @media (max-width: 900px) {
+  .downstream-figures { grid-template-columns: minmax(0, 1fr); }
+  .downstream-gallery-toolbar label { width: 100%; }
+  .downstream-gallery-toolbar > a { margin-left: 0; }
   .downstream-params { grid-template-columns: 1fr; }
   .downstream-cta { flex-direction: column; align-items: stretch; }
 }
