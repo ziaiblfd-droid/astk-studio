@@ -257,6 +257,13 @@ class ASTKHandler(SimpleHTTPRequestHandler):
                 raise ValueError("params must be a JSON object")
             if str(params.get("mode") or "ora").strip().lower() not in {"ora", "compare"}:
                 raise ValueError("Unsupported enrichment mode")
+            if str(params.get("database") or params.get("db") or "GO_BP").upper() != "GO_BP":
+                raise ValueError("Only GO Biological Process (BP) is supported")
+            from backend.downstream import _cutoff
+            _cutoff(params, "pvalue", "pval")
+            _cutoff(params, "qvalue", "qval")
+            if str(params.get("gene_set") or "significant").strip().lower() not in {"significant", "up", "down"}:
+                raise ValueError("Unsupported enrichment gene set")
             parent = STORE.read(parent_id)
             if not parent:
                 self.send_json({"error": f"Parent job not found: {parent_id}"}, HTTPStatus.NOT_FOUND)

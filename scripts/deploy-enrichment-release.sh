@@ -19,14 +19,18 @@ idle() {
 idle || { echo "Backend is busy; no deployment performed" >&2; exit 3; }
 mkdir -p "$TARGET"
 rsync -a --exclude=data --exclude=__pycache__ --exclude='*.pyc' --exclude=.git --exclude=.wrangler --exclude=_backups "$PREVIOUS/" "$TARGET/"
-for file in backend/server.py backend/downstream.py index.html downstream.js downstream.css i18n.js; do
+for file in backend/server.py backend/downstream.py backend/native_enrichment.py backend/native_enrichment.R index.html downstream.js downstream.css i18n.js; do
   [[ -f "$STAGE/$file" ]] || exit 2
   cp "$STAGE/$file" "$TARGET/$file"
 done
 mkdir -p "$TARGET/tests"
 cp "$STAGE"/tests/test_*.py "$TARGET/tests/"
+for file in native_enrichment_contract.R native_enrichment_reference.py native_enrichment_compare_reference.R; do
+  cp "$STAGE/tests/$file" "$TARGET/tests/$file"
+done
 ln -s "$BASE/data" "$TARGET/data"
-(cd "$TARGET" && "$PY" -m py_compile backend/server.py backend/downstream.py && "$PY" -m unittest discover -s tests -q)
+(cd "$TARGET" && "$PY" -m py_compile backend/server.py backend/downstream.py backend/native_enrichment.py && "$PY" -m unittest discover -s tests -q)
+"$HOME/miniconda3/envs/astk/bin/Rscript" "$TARGET/tests/native_enrichment_contract.R" "$TARGET/backend/native_enrichment.R"
 STATE="$BASE/deployments/$RELEASE_ID"
 mkdir -p "$STATE"
 printf '%s\n' "$PREVIOUS" > "$STATE/previous-release"

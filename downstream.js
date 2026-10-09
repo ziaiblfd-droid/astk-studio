@@ -4,7 +4,7 @@
 
   const state = { parentId: null, ready: false, backend: false, busy: false, results: {} };
   const POLL_MS = 2500;
-  const MAX_POLLS = 600;
+  const MAX_POLLS = 8640;
   const $ = (selector, root = document) => root.querySelector(selector);
   const $$ = (selector, root = document) => Array.from(root.querySelectorAll(selector));
   const studio = () => window.ASTKStudio || null;
@@ -67,7 +67,8 @@
     const figures = figureItems(results);
     const comparison = box.querySelector('[data-filter="comparison"]')?.value || '';
     const eventType = box.querySelector('[data-filter="event_type"]')?.value || '';
-    const visible = figures.filter((item) => (!comparison || item.comparison === comparison) && (!eventType || item.event_type === eventType));
+    const kind = box.querySelector('[data-filter="kind"]')?.value || '';
+    const visible = figures.filter((item) => (!comparison || item.comparison === comparison) && (!eventType || item.event_type === eventType) && (!kind || (item.kind || mode) === kind));
     const gallery = box.querySelector('.downstream-figures');
     gallery.innerHTML = visible.map((item) => `
       <figure class="downstream-figure">
@@ -94,9 +95,10 @@
     const figures = figureItems(results);
     const comparisons = [...new Set(figures.map((item) => item.comparison).filter(Boolean))];
     const types = [...new Set(figures.map((item) => item.event_type).filter(Boolean))];
-    const filters = mode === 'ora' ? `
+    const filters = `
       <label>比较组<select data-filter="comparison"><option value="">全部比较组</option>${comparisons.map((value) => `<option value="${esc(value)}">${esc(value)}</option>`).join('')}</select></label>
-      <label>事件类型<select data-filter="event_type"><option value="">全部事件类型</option>${types.map((value) => `<option value="${esc(value)}">${esc(value)}</option>`).join('')}</select></label>` : '';
+      <label>事件类型<select data-filter="event_type"><option value="">全部事件类型</option>${types.map((value) => `<option value="${esc(value)}">${esc(value)}</option>`).join('')}</select></label>
+      ${mode === 'ora' ? '<label>结果图<select data-filter="kind"><option value="ora">过表达富集</option><option value="clusters">GO 聚类</option><option value="">全部图片</option></select></label>' : ''}`;
     const csv = (results.files || []).filter((item) => (typeof item === 'string' ? item : item.path)?.endsWith('.csv'));
     const aggregate = csv.find((item) => typeof item === 'string' && (/^output\/enrichment_[^/]+\.csv$/.test(item) || /^output\/enrichment_compare\/[^/]+\/comparison\.csv$/.test(item)));
     const download = aggregate ? `<a class="button secondary" href="${esc(fileUrl(results.job_id, aggregate))}" download><i data-lucide="download"></i>下载结果 CSV</a>` : '';

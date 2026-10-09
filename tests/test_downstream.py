@@ -1,225 +1,196 @@
 from __future__ import annotations
 
-import json
 import csv
+import json
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from backend.downstream import (
-    EVENT_TYPES, _bh_adjust, _comparison_units, _event_id_from_line,
-    _fisher_right, _load_events_file, _run_ora, _safe_token, run_downstream, run_enrichment,
+    EVENT_TYPES, _comparison_units, _cutoff, _detect_species, _event_id_from_line,
+    _load_events_file, _safe_token, run_downstream, run_enrichment,
 )
 from backend.store import JobStore
 
 
 class DownstreamTests(unittest.TestCase):
-    def test_event_id_parser_ignores_headers_and_accepts_whitespace(self) -> None:
-        self.assertEqual(_event_id_from_line("event_id\tdpsi\tp_value"), "")
-        self.assertEqual(
-            _event_id_from_line("  ENSMUSG1.1;SE:chr1:1-2:3-4  0.4  0.01"),
-            "ENSMUSG1.1;SE:chr1:1-2:3-4",
-        )
-
-    def make_fixture(self, root: Path):
+    def make_fixture(self, root):
         store = JobStore(root / "jobs")
         store.create("PARENT", {"species": "mm10", "p_value": 0.05, "abs_dpsi": 0.1})
         store.update("PARENT", status="completed")
-        directory = store.job_dir("PARENT")
+        parent = store.job_dir("PARENT")
         groups = ["facial_11.5_12", "facial_11.5_13"]
-        (directory / "plan.json").write_text(json.dumps({"comparisons": [{"group": g} for g in groups]}), encoding="utf-8")
-        (directory / "output/results.json").write_text(json.dumps({"reference": "mm10", "events": []}), encoding="utf-8")
+        (parent / "plan.json").write_text(json.dumps({"comparisons": [{"group": g} for g in groups]}), encoding="utf-8")
+        (parent / "output/results.json").write_text(json.dumps({"reference": "mm10"}), encoding="utf-8")
         for group in groups:
             for kind in EVENT_TYPES:
-                background = directory / "output/analysis/dpsi" / f"{group}_{kind}.dpsi"
-                significant = directory / "output/analysis/sig01/dpsi" / f"{group}_{kind}.sig.dpsi"
-                for path in (background, significant):
+                for directory, suffix in (("dpsi", ".dpsi"), ("sig01/dpsi", ".sig.dpsi")):
+                    path = parent / "output/analysis" / directory / (group + "_" + kind + suffix)
                     path.parent.mkdir(parents=True, exist_ok=True)
-                rows = [f"G{i};{kind}:chr1:1-2:3-4\t{0.4 if i < 5 else 0.01}\t{0.001 if i < 5 else 0.8}\n" for i in range(100)]
-                background.write_text("event_id\tdpsi\tp_value\n" + "".join(rows), encoding="utf-8")
-                significant.write_text("event_id\tdpsi\tp_value\n" + "".join(rows[:5] if group == groups[0] else rows[5:8]), encoding="utf-8")
-        genesets = root / "genesets"
-        genesets.mkdir()
-        (genesets / "GO_BP.gmt").write_text("term1\t\t" + "\t".join(f"G{i}" for i in range(5)) + "\nall\t\t" + "\t".join(f"G{i}" for i in range(100)) + "\n", encoding="utf-8")
+                    path.write_text(
+                        f"event_id\tdpsi\tp_value\nENSMUSG1.1;{kind}:chr1:1-2:3-4:+\t0.4\t0.001\n"
+                        f"ENSMUSG2;{kind}:chr1:1-2:3-4:+\t-0.4\t0.001\n",
+                        encoding="utf-8")
         store.create("CHILD", {})
-        return store, genesets
+        return store
 
-    def test_enrichment_clamps_cutoffs_and_writes_results(self) -> None:
-        with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary)
-            store = JobStore(root / "jobs")
-            parent = store.create("PARENT", {"species": "mm10"})
-            store.update("PARENT", status="completed", progress=100)
-            parent_output = store.job_dir("PARENT") / "output"
-            (parent_output / "results.json").write_text(
-                json.dumps({
-                    "reference": "mm10",
-                    "events": [["ENSMUSG1.1;SE:chr1:1-2:3-4", "GENE1", "SE"]],
-                }),
-                encoding="utf-8",
-            )
-            (parent_output / "events.sig.dpsi").write_text(
-                "event_id\tdpsi\tp_value\n"
-                "ENSMUSG1.1;SE:chr1:1-2:3-4\t0.4\t0.01\n",
-                encoding="utf-8",
-            )
-            (store.job_dir("PARENT") / "plan.json").write_text(json.dumps({"comparisons": [{"group": "g1"}]}), encoding="utf-8")
-            background = parent_output / "analysis/dpsi/g1_SE.dpsi"
-            significant = parent_output / "analysis/sig01/dpsi/g1_SE.sig.dpsi"
-            for path in (background, significant):
-                path.parent.mkdir(parents=True, exist_ok=True)
-                path.write_text((parent_output / "events.sig.dpsi").read_text(encoding="utf-8"), encoding="utf-8")
-            child = store.create("CHILD", {})
-            genesets = root / "genesets"
-            genesets.mkdir()
-            (genesets / "GO_BP.gmt").write_text("term (GO:1)\t\tGENE1\n", encoding="utf-8")
+    def fake_native(self, manifest_path, store, job_id):
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        self.manifest = manifest
+        output = manifest_path.parent
+        cells = []
+        for cell in manifest["cells"]:
+            base = f"enrichment{'_compare' if manifest['mode'] == 'compare' else ''}/{cell['key']}"
+            image, table = base + "/GO.BP.png", base + "/GO.BP.csv"
+            (output / image).parent.mkdir(parents=True, exist_ok=True)
+            (output / image).write_bytes(b"\x89PNG\r\n\x1a\n" + b"test image")
+            (output / table).write_text(
+                '"","ID","Description","GeneRatio","BgRatio","pvalue","p.adjust","qvalue","geneID","Count"\n'
+                '"GO:1","GO:1","splicing","2/449","198/24292",0.0001,0.001,0.0009,"A/B",2\n',
+                encoding="utf-8")
+            cells.append({**cell, "images": [image], "tables": [table], "files": [image, table],
+                          "status": "missing_input" if cell["missing"] else "completed", "terms": 1})
+        return {"units": cells, "provenance": {"engine": "ASTK"}}
 
-            with patch("backend.downstream.GENESET_DIR", genesets):
-                result = run_enrichment(
-                    store,
-                    "CHILD",
-                    "PARENT",
-                    {"database": "GO_BP", "pvalue": 0, "qvalue": 2, "gene_set": "unknown"},
-                )
+    def run_fixture(self, store, params=None):
+        with patch("backend.downstream._run_native", side_effect=self.fake_native):
+            return run_enrichment(store, "CHILD", "PARENT", params or {})
 
-            self.assertEqual(result["params"]["gene_set"], "significant")
-            self.assertEqual(result["params"]["pvalue"], 0.0)
-            self.assertEqual(result["params"]["qvalue"], 1.0)
-            self.assertTrue((store.job_dir("CHILD") / "output" / "enrichment_GO_BP.csv").exists())
+    def test_event_parser(self):
+        self.assertEqual(_event_id_from_line("event_id\tdpsi\tp_value"), "")
+        self.assertEqual(_event_id_from_line("  G1;SE:chr1:1-2  0.4  0.01"), "G1;SE:chr1:1-2")
 
-    def test_two_comparisons_produce_fourteen_distinct_images(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            store, genesets = self.make_fixture(Path(temporary))
-            with patch("backend.downstream.GENESET_DIR", genesets):
-                result = run_enrichment(store, "CHILD", "PARENT", {})
-            images = result["images"]["ora"]
-            self.assertEqual(len(images), 14)
-            self.assertEqual(len({i["path"] for i in images}), 14)
-            self.assertEqual(result["summary"]["Expected plots"], 14)
-            for item in images:
-                path = store.job_dir("CHILD") / item["path"]
-                self.assertTrue(path.is_file())
-                self.assertGreater(path.stat().st_size, 1000)
-            self.assertTrue(all(u["input_genes"] == 5 for u in result["units"][:7]))
-            self.assertTrue(all(u["input_genes"] == 3 for u in result["units"][7:]))
-            self.assertTrue(all(u["significant_terms"] == 1 for u in result["units"][:7]))
-            self.assertTrue(all(u["significant_terms"] == 0 for u in result["units"][7:]))
+    def test_defaults_are_astk_point_one_and_bp_only(self):
+        with tempfile.TemporaryDirectory() as temp:
+            result = self.run_fixture(self.make_fixture(Path(temp)))
+            self.assertEqual(result["params"]["pvalue"], 0.1)
+            self.assertEqual(result["params"]["qvalue"], 0.1)
+            self.assertEqual(self.manifest["ontology"], "BP")
+            self.assertTrue(self.manifest["simple"])
+            self.assertNotIn("background", self.manifest)
 
-    def test_missing_sig_file_is_derived_without_mixing_groups(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            store, genesets = self.make_fixture(Path(temporary))
-            (store.job_dir("PARENT") / "output/analysis/sig01/dpsi/facial_11.5_12_SE.sig.dpsi").unlink()
-            with patch("backend.downstream.GENESET_DIR", genesets):
-                result = run_enrichment(store, "CHILD", "PARENT", {"mode": "compare"})
-            unit = next(u for u in result["units"] if u["group"] == "facial_11.5_12" and u["event_type"] == "SE")
-            self.assertEqual(unit["input_genes"], 5)
-            self.assertEqual(unit["source"], "derived_from_dpsi")
-            self.assertEqual(len(result["images"]["compare"]), 2)
-            for image in result["images"]["compare"]:
-                self.assertTrue((store.job_dir("CHILD") / image["path"]).is_file())
-
-    def test_missing_background_is_marked_and_other_units_continue(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            store, genesets = self.make_fixture(Path(temporary))
-            (store.job_dir("PARENT") / "output/analysis/dpsi/facial_11.5_12_SE.dpsi").unlink()
-            with patch("backend.downstream.GENESET_DIR", genesets):
-                result = run_enrichment(store, "CHILD", "PARENT", {})
+    def test_two_groups_produce_fourteen_native_figures(self):
+        with tempfile.TemporaryDirectory() as temp:
+            store = self.make_fixture(Path(temp))
+            result = self.run_fixture(store)
             self.assertEqual(len(result["images"]["ora"]), 14)
-            self.assertEqual(result["summary"]["Missing input pairs"], 1)
-            unit = next(u for u in result["units"] if u["group"] == "facial_11.5_12" and u["event_type"] == "SE")
-            self.assertEqual(unit["status"], "missing_background")
-            self.assertEqual(unit["terms"], 0)
+            self.assertEqual(len({i["path"] for i in result["images"]["ora"]}), 14)
+            self.assertTrue(all((store.job_dir("CHILD") / i["path"]).is_file() for i in result["images"]["ora"]))
+            self.assertEqual({u["input_genes"] for u in result["units"]}, {2})
 
-    def test_plot_failure_fails_job_instead_of_silent_success(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            store, genesets = self.make_fixture(Path(temporary))
+    def test_compare_runs_length_clusters_per_group_type_not_mixed(self):
+        with tempfile.TemporaryDirectory() as temp:
+            result = self.run_fixture(self.make_fixture(Path(temp)), {"mode": "compare"})
+            self.assertEqual(len(result["images"]["compare"]), 14)
+            self.assertEqual(self.manifest["length_breaks"], [1, 51, 251, 1001])
+            self.assertTrue(all(i["comparison"] and i["event_type"] for i in result["images"]["compare"]))
+
+    def test_sig_file_does_not_require_tested_background(self):
+        with tempfile.TemporaryDirectory() as temp:
+            store = self.make_fixture(Path(temp))
+            (store.job_dir("PARENT") / "output/analysis/dpsi/facial_11.5_12_SE.dpsi").unlink()
+            result = self.run_fixture(store)
+            cell = next(c for c in result["units"] if c["key"] == "facial_11.5_12_SE")
+            self.assertFalse(cell["missing"])
+            self.assertEqual(cell["input_genes"], 2)
+
+    def test_missing_sig_derived_per_type(self):
+        with tempfile.TemporaryDirectory() as temp:
+            store = self.make_fixture(Path(temp))
+            (store.job_dir("PARENT") / "output/analysis/sig01/dpsi/facial_11.5_12_SE.sig.dpsi").unlink()
+            result = self.run_fixture(store)
+            cell = next(c for c in result["units"] if c["key"] == "facial_11.5_12_SE")
+            self.assertEqual(cell["source"], "derived_from_dpsi")
+            self.assertEqual(cell["input_events"], 2)
+
+    def test_direction_filter_keeps_versionless_ensembl_and_header(self):
+        with tempfile.TemporaryDirectory() as temp:
+            store = self.make_fixture(Path(temp))
+            self.run_fixture(store, {"gene_set": "down"})
+            cell = self.manifest["cells"][0]
+            events = _load_events_file(Path(cell["input"]))
+            self.assertEqual([e["gene_id"] for e in events], ["ENSMUSG2"])
+            self.assertTrue(Path(cell["input"]).read_text().startswith("event_id\t"))
+
+    def test_csv_preserves_native_precision_ratios_and_true_qvalue(self):
+        with tempfile.TemporaryDirectory() as temp:
+            store = self.make_fixture(Path(temp))
+            self.run_fixture(store)
+            with (store.job_dir("CHILD") / "output/enrichment_GO_BP.csv").open(encoding="utf-8-sig") as handle:
+                rows = list(csv.DictReader(handle))
+            self.assertEqual(len(rows), 14)
+            self.assertEqual(rows[0]["BgRatio"], "198/24292")
+            self.assertNotEqual(rows[0]["p.adjust"], rows[0]["qvalue"])
+
+    def test_invalid_databases_and_thresholds_rejected(self):
+        for params in ({"database": "GO_MF"}, {"database": "KEGG"}, {"pvalue": -1}, {"qvalue": 2}, {"qvalue": "nan"}, {"mode": "bad"}):
+            with self.subTest(params=params), self.assertRaises(ValueError):
+                run_enrichment(None, "CHILD", "PARENT", params)
+        self.assertEqual(_cutoff({"pvalue": 0}, "pvalue"), 0)
+
+    def test_native_error_fails_job_with_log(self):
+        with tempfile.TemporaryDirectory() as temp:
+            store = self.make_fixture(Path(temp))
             store.update("CHILD", config={"downstream": {"module": "enrichment", "parent_job_id": "PARENT"}})
-            with patch("backend.downstream.GENESET_DIR", genesets), patch("backend.downstream._matplotlib", side_effect=RuntimeError("test")):
+            with patch("backend.downstream._run_native", side_effect=RuntimeError("R failed")):
                 run_downstream(store, "CHILD")
             self.assertEqual(store.read("CHILD")["status"], "failed")
-            self.assertTrue((store.job_dir("CHILD") / "output/downstream_error.txt").exists())
+            self.assertIn("R failed", (store.job_dir("CHILD") / "output/downstream_error.txt").read_text())
 
-    def test_fisher_and_bh_match_expected_values(self):
-        self.assertAlmostEqual(_fisher_right(1, 0, 0, 9), 0.1)
-        self.assertEqual(_bh_adjust([]), [])
-        for actual, expected in zip(_bh_adjust([0.01, 0.04, 0.03]), [0.03, 0.04, 0.04]):
-            self.assertAlmostEqual(actual, expected)
+    def test_pdf_disguised_as_png_rejected(self):
+        with tempfile.TemporaryDirectory() as temp:
+            store = self.make_fixture(Path(temp))
+            def fake(*args):
+                result = self.fake_native(*args)
+                (args[0].parent / result["units"][0]["images"][0]).write_bytes(b"%PDF")
+                return result
+            with patch("backend.downstream._run_native", side_effect=fake), self.assertRaisesRegex(RuntimeError, "PNG"):
+                run_enrichment(store, "CHILD", "PARENT", {})
 
-    def test_direction_and_unannotated_genes_are_filtered(self):
-        events = [{"gene_id": "G1.2", "dpsi": 0.4}, {"gene_id": "G2", "dpsi": -0.5}, {"gene_id": "G3", "dpsi": 0}, {"gene_id": "unknown", "dpsi": 0.5}]
-        rows, sig, count, background = _run_ora(events, events, {"G1": "G1"}, {"all": {"G1", "G2", "G3"}}, "up", 0, 0)
-        self.assertEqual(count, 1)
-        self.assertEqual(background, 3)
-        self.assertEqual(rows[0]["genes"], ["G1"])
-        self.assertEqual(sig, [])
-
-    def test_unsafe_group_tokens_do_not_collide(self):
-        self.assertNotEqual(_safe_token("a b"), _safe_token("a_b"))
-        self.assertNotIn("/", _safe_token("../a"))
-
-    def test_frontend_has_no_motif_or_result_table(self):
-        root = Path(__file__).resolve().parents[1]
-        for name in ("index.html", "downstream.js", "i18n.js"):
-            self.assertNotIn("motif", (root / name).read_text(encoding="utf-8").lower())
-        self.assertNotIn("renderTable", (root / "downstream.js").read_text(encoding="utf-8"))
-
-    def test_api_rejects_removed_module(self):
-        from backend.server import ASTKHandler
-        from unittest.mock import Mock
-        handler = object.__new__(ASTKHandler)
-        handler.read_json_body = Mock(return_value={"module": "motif"})
-        handler.send_json = Mock()
-        handler.create_downstream_job("PARENT")
-        self.assertEqual(handler.send_json.call_args.args[1], 400)
-
-    def test_parser_accepts_gene_prefix_and_rejects_invalid_numbers(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            path = Path(temporary) / "test_SE.dpsi"
-            path.write_text("event_id\tdpsi\tp_value\nGENE1;SE:chr1:1-2\t0.2\t0.01\nGENE2;SE:chr1:1-2\tbad\t0.01\nGENE3;SE:chr1:1-2\tnan\t0.01\nGENE4;SE:chr1:1-2\t0.2\t2\n", encoding="utf-8-sig")
-            self.assertEqual([row["gene_id"] for row in _load_events_file(path, "SE")], ["GENE1"])
-
-    def test_compare_paginates_and_exports_nonsignificant_rows(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            store, genesets = self.make_fixture(Path(temporary))
-            parent = store.job_dir("PARENT")
-            (parent / "plan.json").write_text(json.dumps({"comparisons": [{"group": group} for group in ("facial_11.5_12", "facial_11.5_13", "extra")]}), encoding="utf-8")
-            with patch("backend.downstream.GENESET_DIR", genesets):
-                result = run_enrichment(store, "CHILD", "PARENT", {"mode": "compare"})
-            self.assertEqual(len(result["images"]["compare"]), 4)
-            self.assertEqual(result["summary"]["Expected plots"], 4)
-            with (store.job_dir("CHILD") / "output/enrichment_compare/GO_BP/comparison.csv").open(encoding="utf-8-sig") as handle:
-                rows = list(csv.DictReader(handle))
-            self.assertTrue(any(row["significant"] == "False" for row in rows))
-            self.assertEqual({row["comparison"] for row in rows}, {"facial_11.5_12", "facial_11.5_13"})
-
-    def test_empty_compare_still_produces_bubble_and_heatmap(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            store, genesets = self.make_fixture(Path(temporary))
-            with patch("backend.downstream.GENESET_DIR", genesets):
-                result = run_enrichment(store, "CHILD", "PARENT", {"mode": "compare", "pvalue": 0})
-            self.assertEqual(len(result["images"]["compare"]), 2)
-            self.assertTrue(all((store.job_dir("CHILD") / image["path"]).is_file() for image in result["images"]["compare"]))
-
-    def test_legacy_filename_inference_and_duplicate_comparisons(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            store, _ = self.make_fixture(Path(temporary))
+    def test_legacy_groups_and_duplicates(self):
+        with tempfile.TemporaryDirectory() as temp:
+            store = self.make_fixture(Path(temp))
             parent = store.job_dir("PARENT")
             (parent / "plan.json").unlink()
             self.assertEqual(len(_comparison_units(parent)), 2)
-            (parent / "plan.json").write_text(json.dumps({"comparisons": [{"group": "g"}, {"group": "g"}]}), encoding="utf-8")
+            (parent / "plan.json").write_text(json.dumps({"comparisons": [{"group": "g"}, {"group": "g"}]}))
             self.assertEqual(len(_comparison_units(parent)), 1)
 
-    def test_ora_retains_all_overlap_genes(self):
-        events = [{"gene_id": f"G{i}", "dpsi": 0.5} for i in range(60)]
-        rows, _, _, _ = _run_ora(events, events, {}, {"term": {e["gene_id"] for e in events}}, "significant", 1, 1)
-        self.assertEqual(len(rows[0]["genes"]), 60)
+    def test_species_detection_is_not_silent_mouse_fallback(self):
+        self.assertEqual(_detect_species({}, {"reference": {"species": "human"}}), "hg38")
+        with self.assertRaises(ValueError):
+            _detect_species({}, {})
 
-    def test_api_rejects_invalid_mode(self):
+    def test_unsafe_tokens_do_not_collide(self):
+        self.assertNotEqual(_safe_token("a b"), _safe_token("a_b"))
+        self.assertNotIn("/", _safe_token("../a"))
+
+    def test_parser_rejects_invalid_numbers(self):
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / "SE.dpsi"
+            path.write_text("event_id\tdpsi\tp_value\nG1;SE:chr1:1-2\t.2\t.01\nG2;SE:chr1:1-2\tbad\t.01\nG3;SE:chr1:1-2\tnan\t.01\nG4;SE:chr1:1-2\t.2\t2\n")
+            self.assertEqual([r["gene_id"] for r in _load_events_file(path, "SE")], ["G1"])
+
+    def test_frontend_bp_only_no_motif_or_tables(self):
+        root = Path(__file__).resolve().parents[1]
+        for name in ("index.html", "downstream.js", "i18n.js"):
+            self.assertNotIn("motif", (root / name).read_text(encoding="utf-8").lower())
+        html = (root / "index.html").read_text(encoding="utf-8")
+        for value in ("GO_MF", "GO_CC", 'value="KEGG"'):
+            self.assertNotIn(value, html)
+        self.assertNotIn("renderTable", (root / "downstream.js").read_text(encoding="utf-8"))
+
+    def test_api_rejects_bad_parameters_before_creating_jobs(self):
         from backend.server import ASTKHandler
-        from unittest.mock import Mock
-        handler = object.__new__(ASTKHandler)
-        handler.read_json_body = Mock(return_value={"module": "enrichment", "params": {"mode": "invalid"}})
-        handler.send_json = Mock()
-        handler.create_downstream_job("PARENT")
-        self.assertEqual(handler.send_json.call_args.args[1], 400)
+        for payload in (
+            {"module": "motif"}, {"module": "enrichment", "params": {"mode": "invalid"}},
+            {"module": "enrichment", "params": {"database": "GO_CC"}},
+            {"module": "enrichment", "params": {"pvalue": "nan"}},
+        ):
+            with self.subTest(payload=payload):
+                handler = object.__new__(ASTKHandler)
+                handler.read_json_body = Mock(return_value=payload)
+                handler.send_json = Mock()
+                handler.create_downstream_job("PARENT")
+                self.assertEqual(handler.send_json.call_args.args[1], 400)

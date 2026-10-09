@@ -145,13 +145,13 @@
           <div class="downstream-context"><div class="downstream-notice warn" id="downstream-gate"><i data-lucide="info"></i><span>请先完成基础分析。</span></div></div>
           <div class="downstream-grid">
             <section class="downstream-card" data-module="enrichment">
-              <div class="downstream-card-head"><div class="downstream-icon"><i data-lucide="network"></i></div><div><h2>功能富集</h2><span>GO · KEGG</span></div><span class="downstream-state" data-card-status>等待基础分析</span></div>
+              <div class="downstream-card-head"><div class="downstream-icon"><i data-lucide="network"></i></div><div><h2>功能富集</h2><span>GO · BP</span></div><span class="downstream-state" data-card-status>等待基础分析</span></div>
               <div class="downstream-modes" role="tablist" aria-label="富集模式"><button type="button" class="segmented active" role="tab" data-enrichment-mode="ora" aria-selected="true">过表达富集</button><button type="button" class="segmented" role="tab" data-enrichment-mode="compare" aria-selected="false">富集比对</button></div>
               <div class="downstream-params">
                 <label class="field"><span>基因集</span><div class="select-wrap"><select data-param="gene_set"><option value="significant">全部显著事件</option><option value="up">dPSI 上升事件</option><option value="down">dPSI 下降事件</option></select><i data-lucide="chevron-down"></i></div></label>
-                <label class="field"><span>数据库</span><div class="select-wrap"><select data-param="database"><option value="GO_BP">GO · 生物过程 (BP)</option><option value="GO_MF">GO · 分子功能 (MF)</option><option value="GO_CC">GO · 细胞组分 (CC)</option><option value="KEGG">KEGG 通路</option></select><i data-lucide="chevron-down"></i></div></label>
-                <label class="field"><span>p 值阈值</span><input data-param="pvalue" type="number" min="0" max="1" step="0.001" value="0.05" /></label>
-                <label class="field"><span>FDR 阈值 (BH)</span><input data-param="qvalue" type="number" min="0" max="1" step="0.001" value="0.05" /></label>
+                <label class="field"><span>数据库</span><div class="select-wrap"><select data-param="database"><option value="GO_BP">GO · 生物过程 (BP)</option></select><i data-lucide="chevron-down"></i></div></label>
+                <label class="field"><span>p 值阈值</span><input data-param="pvalue" type="number" min="0" max="1" step="0.001" value="0.1" /></label>
+                <label class="field"><span>q 值阈值</span><input data-param="qvalue" type="number" min="0" max="1" step="0.001" value="0.1" /></label>
               </div>
               <div class="downstream-actions"><button class="button primary downstream-run" data-run="ora" disabled><i data-lucide="play"></i>运行富集分析</button><button class="button primary downstream-run" data-run="compare" hidden disabled><i data-lucide="play"></i>运行富集比对</button></div>
               <div class="downstream-result" data-result="ora" role="tabpanel"></div>
